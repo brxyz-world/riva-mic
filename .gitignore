@@ -1,0 +1,28 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+env/
+pip-wheel-metadata/
+
+# Build
+build/
+dist/
+
+# IDE
+.vscode/
+.idea/
+
+# Node/web
+node_modules/
+.next/
+out/
+coverage/
+
+# Logs / caches / OS
+*.log
+*.tmp
+.cache/
+.DS_Store
+Thumbs.db
