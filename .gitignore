@@ -1,28 +1,21 @@
-﻿# Python
+﻿# Ignore Python cache
 __pycache__/
-*.py[cod]
-*.egg-info/
+*.pyc
+
+# Ignore virtual environment
 .venv/
-env/
-pip-wheel-metadata/
 
-# Build
-build/
-dist/
-
-# IDE
-.vscode/
-.idea/
-
-# Node/web
-node_modules/
-.next/
-out/
-coverage/
-
-# Logs / caches / OS
+# Ignore logs
 *.log
-*.tmp
-.cache/
-.DS_Store
+*.jsonl
+
+# Ignore audio artifacts
+*.wav
+
+# Ignore patch/diff files
+*.diff
+*.patch
+
+# Ignore OS noise
 Thumbs.db
+.DS_Store
