@@ -1,4 +1,4 @@
-# riva_streaming_mic.py
+# riva_streaming_mic.py  (revert-with-fix)
 # Windows-native streaming mic → NVIDIA Riva ASR (gRPC)
 # On PTT release, shells out to eddie_orchestrator.py (separate process).
 
@@ -200,32 +200,33 @@ def main():
                     stream.start()
                 main._f23_prev = _key_down(VK_F23)
 
-                # Process incoming ASR
-                resp = stub.StreamingRecognize(gen_requests(q, args.rate, args.lang, args.punct))
-                for r in resp.results:
-                    alt = r.alternatives[0].transcript if r.alternatives else ""
-                    if r.is_final:
-                        turn_buf.append(alt)
-                        last_final_t = time.perf_counter()
-                        print(f"\r✅ {' '.join(turn_buf)} ", end="", flush=True)
-                        if always_on:
-                            full = " ".join(turn_buf).strip()
-                            t = full.lower()
-                            if wake_armed and wake in t:
-                                wake_armed = False
-                                # Take text after last "wake"; if empty, say "hi"
-                                idx = t.rfind(wake)
-                                final_text = full[idx + len(wake):].strip() or "hi"
-                                finalize_ms = int((time.perf_counter() - last_final_t) * 1000) if last_final_t else 0
-                                log = call_orchestrator_subprocess(final_text, asr_latency_ms=finalize_ms)
-                                print(
-                                    f"\n[Eddie] spoke: {log.get('reply')}  "
-                                    f"(asr={log.get('l_asr_ms')}ms llm={log.get('l_llm_ms',0)}ms "
-                                    f"tts={log.get('l_tts_ms',0)}ms total={log.get('l_total_ms',0)}ms)"
-                                )
-                                turn_buf.clear(); last_final_t = None; wake_armed = True
-                    else:
-                        print(f"\r… {' '.join(turn_buf)}{alt}", end="", flush=True)
+                # Process incoming ASR (FIX: iterate over responses, then each response's results)
+                responses = stub.StreamingRecognize(gen_requests(q, args.rate, args.lang, args.punct))
+                for resp in responses:
+                    for r in resp.results:
+                        alt = r.alternatives[0].transcript if r.alternatives else ""
+                        if r.is_final:
+                            turn_buf.append(alt)
+                            last_final_t = time.perf_counter()
+                            print(f"\r✅ {' '.join(turn_buf)} ", end="", flush=True)
+                            if always_on:
+                                full = " ".join(turn_buf).strip()
+                                t = full.lower()
+                                if wake_armed and wake in t:
+                                    wake_armed = False
+                                    # Take text after last "wake"; if empty, say "hi"
+                                    idx = t.rfind(wake)
+                                    final_text = full[idx + len(wake):].strip() or "hi"
+                                    finalize_ms = int((time.perf_counter() - last_final_t) * 1000) if last_final_t else 0
+                                    log = call_orchestrator_subprocess(final_text, asr_latency_ms=finalize_ms)
+                                    print(
+                                        f"\n[Eddie] spoke: {log.get('reply')}  "
+                                        f"(asr={log.get('l_asr_ms')}ms llm={log.get('l_llm_ms',0)}ms "
+                                        f"tts={log.get('l_tts_ms',0)}ms total={log.get('l_total_ms',0)}ms)"
+                                    )
+                                    turn_buf.clear(); last_final_t = None; wake_armed = True
+                        else:
+                            print(f"\r… {' '.join(turn_buf)}{alt}", end="", flush=True)
 
                 # Update virtual PTT and possibly fire a turn
                 down = _ptt_down()

@@ -51,6 +51,15 @@ def clip_one_sentence(text: str, max_chars: int = 120) -> str:
 def norm(s: str) -> str:
     return re.sub(r'[^a-z0-9\s]', '', s.casefold())
 
+# NEW: keep process alive until audio completes (prevents silent exits on one-shot runs)
+
+def wait_play(play_obj, poll_ms: int = 25):
+    try:
+        while getattr(play_obj, "is_playing", lambda: False)():
+            time.sleep(poll_ms / 1000.0)
+    except Exception:
+        pass
+
 
 # ---------------- Router (instant responses) ----------------
 
@@ -188,6 +197,11 @@ class EddieOrchestrator:
     def __init__(self):
         self.tts = RivaTTS(RIVA_SPEECH_API_URL, VOICE_NAME)
         self.player = AudioPlayer(sample_rate=44100)
+        # NEW: warm up TTS so first real turn isn't cold (~9s)
+        try:
+            _ = self.tts.synth("ok", sample_rate=44100)
+        except Exception:
+            pass
 
     def _speak(self, text: str) -> Tuple[int, object]:
         t0 = time.perf_counter()
@@ -221,6 +235,8 @@ class EddieOrchestrator:
                 "voice": VOICE_NAME,
             }
             self._append_log(log)
+            # NEW: keep process alive until the router audio finishes (fix silent one-shot)
+            wait_play(play_obj)
             return log
 
         # 2) Else LLM with fast-ACK
@@ -272,7 +288,7 @@ class EddieOrchestrator:
             except Exception:
                 pass
 
-        l_tts_ms, _ = self._speak(final_reply)
+        l_tts_ms, play_obj_final = self._speak(final_reply)
         first_audio_ms = int((time.perf_counter() - turn_start) * 1000)
 
         log = {
@@ -289,6 +305,8 @@ class EddieOrchestrator:
             "voice": VOICE_NAME,
         }
         self._append_log(log)
+        # NEW: keep process alive until final audio finishes (fix silent one-shot)
+        wait_play(play_obj_final)
         return log
 
     def _append_log(self, obj: dict):
