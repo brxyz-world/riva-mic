@@ -46,6 +46,26 @@ Write-Host ""
 
 # ----- WARMUP OLLAMA -----
 try {
+  # Ensure Ollama server is running (autostart if port isn't listening)
+  $ollamaReady = $false
+  if (-not (Test-NetConnection -ComputerName 127.0.0.1 -Port 11434 -InformationLevel Quiet)) {
+    try {
+      Write-Host "[*] Starting ollama serve..."
+      Start-Process -FilePath "ollama" -ArgumentList @("serve") -NoNewWindow | Out-Null
+    } catch {
+      Write-Host "[*] Could not start ollama serve: $_"
+    }
+  }
+  # Poll /api/version until ready (max ~120s)
+  for ($i = 0; $i -lt 60; $i++) {
+    try {
+      $ver = Invoke-RestMethod -Method Get -Uri "$($env:OLLAMA_URL)/api/version" -TimeoutSec 2
+      if ($ver) { $ollamaReady = $true; break }
+    } catch { }
+    Start-Sleep -Seconds 2
+  }
+  if (-not $ollamaReady) { Write-Host "[*] Ollama did not report ready (continuing; warmup may be skipped)." }
+
   # 0) Ensure model exists; pull if missing (non-fatal if fails)
   try {
     $tags = Invoke-RestMethod -Method Get -Uri "$($env:OLLAMA_URL)/api/tags" -TimeoutSec 5
@@ -66,11 +86,11 @@ try {
   # 2) Warm the model using a quick run
   $argsList = @("run", $env:OLLAMA_MODEL, "ready")
   $p = Start-Process -FilePath "ollama" -ArgumentList $argsList -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\ollama_warmup.out" -RedirectStandardError "$env:TEMP\ollama_warmup.err"
-  if (-not $p.WaitForExit(20000)) { $p.Kill() }
+  if (-not $p.WaitForExit(60000)) { $p.Kill() }
 
   # 3) Tiny generate to lock caches
   $body = @{ model=$env:OLLAMA_MODEL; prompt="ok"; stream=$false } | ConvertTo-Json
-  Invoke-RestMethod -Method Post -Uri "$($env:OLLAMA_URL)/api/generate" -Body $body -ContentType "application/json" -TimeoutSec 12 | Out-Null
+  Invoke-RestMethod -Method Post -Uri "$($env:OLLAMA_URL)/api/generate" -Body $body -ContentType "application/json" -TimeoutSec 60 | Out-Null
   Write-Host "[*] Ollama warmup complete."
 } catch {
   Write-Host "[*] Warmup skipped: $_"
