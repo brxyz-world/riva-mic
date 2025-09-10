@@ -218,20 +218,33 @@ def main():
 
     try:
         with stream:
+            f23_prev = False
             while True:
-                # toggle always-on on F23 edge
-                if _key_down(VK_F23) and not getattr(main, "_f23_prev", False):
-                    always_on = not always_on
-                    print(f"\n[mode] ALWAYS-ON {'ENABLED' if always_on else 'DISABLED'} (wake='{wake}')")
-                    # Recreate stream with new always_on flag for callback gating
-                    stream.close()
-                    stream, q = make_audio_stream(args.rate, args.block, channels=use_channels, device_idx=dev_idx, always_on=always_on)
-                    stream.start()
-                main._f23_prev = _key_down(VK_F23)
-
-                # Process incoming ASR (FIX: iterate over responses, then each response's results)
+                # Start/Restart the gRPC stream bound to the current queue
                 responses = stub.StreamingRecognize(gen_requests(q, args.rate, args.lang, args.punct))
+                restart_stream = False
                 for resp in responses:
+                    # Debounced ALWAYS-ON toggle on F23 edge
+                    now_f23 = _key_down(VK_F23)
+                    if now_f23 and not f23_prev:
+                        always_on = not always_on
+                        print(f"\n[mode] ALWAYS-ON {'ENABLED' if always_on else 'DISABLED'} (wake='{wake}')")
+                        # Recreate audio stream so callback gates with new flag
+                        try:
+                            stream.close()
+                        except Exception:
+                            pass
+                        stream, q = make_audio_stream(
+                            args.rate, args.block, channels=use_channels, device_idx=dev_idx, always_on=always_on
+                        )
+                        stream.start()
+                        # Force restart of gRPC stream to bind to new queue
+                        restart_stream = True
+                        f23_prev = now_f23
+                        break
+                    f23_prev = now_f23
+
+                    # Process incoming ASR results
                     for r in resp.results:
                         alt = r.alternatives[0].transcript if r.alternatives else ""
                         if r.is_final:
@@ -259,31 +272,35 @@ def main():
                         else:
                             print(f"\r… {' '.join(turn_buf)}{alt}", end="", flush=True)
 
-                # Update virtual PTT and possibly fire a turn
-                down = _ptt_down()
-                _update_virtual_down(down, was_down, linger_until)
+                    # Update virtual PTT and possibly fire a turn
+                    down = _ptt_down()
+                    _update_virtual_down(down, was_down, linger_until)
 
-                if not always_on:
-                    if was_down and not _ptt_virtual_down():
-                        final_text = " ".join(turn_buf).strip()
-                        if final_text:
-                            if args.type_to_cursor:
-                                _type_to_cursor(final_text)
-                            finalize_ms = 0
-                            if last_final_t is not None:
-                                finalize_ms = int((time.perf_counter() - last_final_t) * 1000)
-                            log = call_orchestrator_subprocess(final_text, asr_latency_ms=finalize_ms)
-                            print(
-                                f"\n[Eddie] spoke: {log.get('reply')}  "
-                                f"(asr={log.get('l_asr_ms')}ms llm={log.get('l_llm_ms',0)}ms "
-                                f"tts={log.get('l_tts_ms',0)}ms total={log.get('l_total_ms',0)}ms)"
-                            )
-                        # reset turn
-                        turn_buf.clear()
-                        last_final_t = None
-                        linger_until[0] = None
+                    if not always_on:
+                        if was_down and not _ptt_virtual_down():
+                            final_text = " ".join(turn_buf).strip()
+                            if final_text:
+                                if args.type_to_cursor:
+                                    _type_to_cursor(final_text)
+                                finalize_ms = 0
+                                if last_final_t is not None:
+                                    finalize_ms = int((time.perf_counter() - last_final_t) * 1000)
+                                log = call_orchestrator_subprocess(final_text, asr_latency_ms=finalize_ms)
+                                print(
+                                    f"\n[Eddie] spoke: {log.get('reply')}  "
+                                    f"(asr={log.get('l_asr_ms')}ms llm={log.get('l_llm_ms',0)}ms "
+                                    f"tts={log.get('l_tts_ms',0)}ms total={log.get('l_total_ms',0)}ms)"
+                                )
+                            # reset turn
+                            turn_buf.clear()
+                            last_final_t = None
+                            linger_until[0] = None
 
-                was_down = down
+                    was_down = down
+
+                if not restart_stream:
+                    # Streaming ended unexpectedly; exit outer loop
+                    break
 
     except KeyboardInterrupt:
         pass
