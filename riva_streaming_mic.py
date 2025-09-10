@@ -8,6 +8,16 @@ import sounddevice as sd
 import grpc
 import ctypes
 
+def _type_to_cursor(text: str):
+    try:
+        # Put text on clipboard, then paste via Ctrl+V at the active cursor
+        p = subprocess.Popen(['clip'], stdin=subprocess.PIPE)
+        p.communicate(input=(text or '').encode('utf-16le'))
+        ps = "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^v')"
+        subprocess.run(['powershell', '-NoProfile', '-Command', ps], check=False)
+    except Exception as e:
+        print(f"[type] {e}", file=sys.stderr)
+
 # --- Hotkeys ---
 VK_F24, VK_SPACE, VK_F23 = 0x87, 0x20, 0x86  # F24=PTT, SPACE=PTT, F23=toggle always-on
 _user32 = ctypes.windll.user32
@@ -116,9 +126,21 @@ def call_orchestrator_subprocess(final_text: str, asr_latency_ms: int = 0) -> di
     cmd = [py, orch_path, "--text", final_text]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        out = proc.stdout.strip()
-        lines = [ln for ln in out.splitlines() if ln.startswith("{") and ln.endswith("}")]
-        payload = json.loads(lines[-1]) if lines else {}
+        out = (proc.stdout or "").strip()
+        payload = {}
+        # Prefer full JSON parse first
+        try:
+            if out:
+                payload = json.loads(out)
+        except Exception:
+            # Fallback: extract the last JSON object from mixed stdout
+            try:
+                start = out.find("{")
+                end = out.rfind("}")
+                if start != -1 and end != -1 and end > start:
+                    payload = json.loads(out[start : end + 1])
+            except Exception:
+                payload = {}
         payload.setdefault("l_asr_ms", asr_latency_ms)
         return payload
     except subprocess.CalledProcessError as e:
@@ -148,7 +170,12 @@ def _update_virtual_down(down_now, was_down, linger_until):
 
 def main():
     ap = argparse.ArgumentParser("Riva streaming mic client")
-    ap.add_argument("--server", default="localhost:50051")
+    default_server = os.getenv("RIVA_SPEECH_API", "localhost:50051")
+    ap.add_argument(
+        "--server",
+        default=default_server,
+        help=f"Riva host:port (default from RIVA_SPEECH_API or {default_server})"
+    )
     ap.add_argument("--rate", type=int, default=48000)          # 48 kHz stable on many Windows inputs
     ap.add_argument("--block", type=int, default=2400)          # ~50ms @ 48k
     ap.add_argument("--device", default=None, help="Input device index or name substring")
@@ -157,6 +184,7 @@ def main():
     ap.add_argument("--punct", action="store_true")
     ap.add_argument("--always_on", action="store_true", help="Start in always-on mode (wake word required).")
     ap.add_argument("--wake", default=os.getenv("EDDIE_WAKE", "eddie"), help="Wake word for always-on mode.")
+    ap.add_argument("--type_to_cursor", action="store_true", help="Paste final transcript at active cursor (Windows)")
     args = ap.parse_args()
 
     dev_idx = resolve_input_device(args.device)
@@ -183,6 +211,7 @@ def main():
     last_final_t = None
     linger_until = [None]  # boxed so closures can mutate
 
+    print(f"[mic] connecting to Riva @ {args.server}")
     print("[mic] streaming… (hold F24 or SPACE to talk; F23 toggles always-on)  Ctrl+C to stop")
     if always_on:
         print(f"[mode] ALWAYS-ON enabled (wake word: '{wake}')")
@@ -217,6 +246,8 @@ def main():
                                     # Take text after last "wake"; if empty, say "hi"
                                     idx = t.rfind(wake)
                                     final_text = full[idx + len(wake):].strip() or "hi"
+                                    if args.type_to_cursor:
+                                        _type_to_cursor(final_text)
                                     finalize_ms = int((time.perf_counter() - last_final_t) * 1000) if last_final_t else 0
                                     log = call_orchestrator_subprocess(final_text, asr_latency_ms=finalize_ms)
                                     print(
@@ -236,6 +267,8 @@ def main():
                     if was_down and not _ptt_virtual_down():
                         final_text = " ".join(turn_buf).strip()
                         if final_text:
+                            if args.type_to_cursor:
+                                _type_to_cursor(final_text)
                             finalize_ms = 0
                             if last_final_t is not None:
                                 finalize_ms = int((time.perf_counter() - last_final_t) * 1000)
