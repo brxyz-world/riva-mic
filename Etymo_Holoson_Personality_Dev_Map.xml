@@ -1,0 +1,148 @@
+<EHPP version="1.0" lane="Personality" repo="https://github.com/brxyz-world/riva-mic">
+  <Principles>
+    <RoutingPhilosophy>ACK first → route smart → add flavor</RoutingPhilosophy>
+    <Axes>
+      <Axis name="Utility"/>
+      <Axis name="Personality"/>
+      <Axis name="Performance"/>
+    </Axes>
+    <MemoryTiers>
+      <Tier name="Ephemeral" status="active">Short-turn carryover; local thread references.</Tier>
+      <Tier name="Personal" status="planned">Stable user preferences and safe facts.</Tier>
+      <Tier name="Cultural" status="planned">Eddie’s lore, recurring bits, show canon.</Tier>
+    </MemoryTiers>
+    <LaneDiscipline>No debugging or code in this lane; all technical issues go to Eddie Debug Lane.</LaneDiscipline>
+  </Principles>
+
+  <Utterances>
+    <Fillers>
+      <U weight="0.6">Hm</U>
+      <U weight="0.3">Hmm</U>
+      <U weight="0.1">Uh</U>
+    </Fillers>
+  </Utterances>
+
+  <Phases>
+
+    <Phase id="1" name="Router Core">
+      <Intent>Reliable branching among utility, personality, and fallback with instant ACKs.</Intent>
+      <Done>
+        <Item>Consistent ACK-first behavior within latency budget.</Item>
+        <Item>Explicit routing branches: utility | personality | fallback.</Item>
+        <Item>Light personality flavor on ACKs and fallbacks.</Item>
+      </Done>
+      <CheckpointRitual>
+        A 90-second routing gauntlet of 10 mixed prompts without stalls.
+      </CheckpointRitual>
+      <Measures>
+        <Metric>ACK latency</Metric>
+        <Metric>Route accuracy percent</Metric>
+        <Metric>User-perceived snappiness</Metric>
+      </Measures>
+      <Dependencies/>
+    </Phase>
+
+    <Phase id="2" name="Personality Layer">
+      <Intent>Establish tone, humor, and Eddie-isms; maintain short-term threads.</Intent>
+      <Done>
+        <Item>Stylebook: voice, tics, humor boundaries, pet phrases.</Item>
+        <Item>Ephemeral memory for last 3–5 turns.</Item>
+        <Item>Flavorful ACKs and fallbacks that stay concise.</Item>
+      </Done>
+      <CheckpointRitual>
+        A 2-minute mini-monologue where Eddie recaps a short chat in his own voice.
+      </CheckpointRitual>
+      <Measures>
+        <Metric>Tone consistency with stylebook</Metric>
+        <Metric>User delight score</Metric>
+        <Metric>On-tone line percentage</Metric>
+      </Measures>
+      <Dependencies>
+        <PhaseRef id="1"/>
+      </Dependencies>
+    </Phase>
+
+    <Phase id="3" name="Identity Expansion">
+      <Intent>Prosody/affect control and mood presets; formalize memory tiers.</Intent>
+      <Done>
+        <Item>Prosody presets: calm, playful, solemn.</Item>
+        <Item>Subtle emotional cues in timing and emphasis.</Item>
+        <Item>Defined memory tier policy (Ephemeral active; Personal/Cultural planned).</Item>
+      </Done>
+      <CheckpointRitual>
+        Three-mood reading of the same line (calm, playful, solemn).
+      </CheckpointRitual>
+      <Measures>
+        <Metric>Affect accuracy (human rating)</Metric>
+        <Metric>Tone-switch smoothness</Metric>
+      </Measures>
+      <Dependencies>
+        <PhaseRef id="2"/>
+      </Dependencies>
+    </Phase>
+
+    <Phase id="4" name="Embodiment">
+      <Intent>Prepare Unreal Holo Call presence: lip-sync, simple gestures, timing.</Intent>
+      <Done>
+        <Item>Lip-sync aligned to TTS cadence.</Item>
+        <Item>Minimal gesture palette: idle, nod, tilt, greet.</Item>
+        <Item>Stage-presence script: intro, acknowledgment beats, resting states.</Item>
+      </Done>
+      <CheckpointRitual>
+        A 30-second Unreal clip where Eddie introduces himself and reacts to a prompt.
+      </CheckpointRitual>
+      <Measures>
+        <Metric>Lip-sync drift (ms)</Metric>
+        <Metric>Gesture timing score</Metric>
+        <Metric>Viewer clarity rating</Metric>
+      </Measures>
+      <Dependencies>
+        <PhaseRef id="3"/>
+      </Dependencies>
+    </Phase>
+
+    <Phase id="5" name="MCP Integration">
+      <Intent>Use MCP as the nervous system for tool interop (OBS, Twitch, Spotify, Unreal, logs).</Intent>
+      <Done>
+        <Item>Deterministic routing for toolable intents vs conversational replies.</Item>
+        <Item>Safe-ops wrapper with confirmations for sensitive actions.</Item>
+        <Item>Autonomy loop: ask → confirm → execute → report.</Item>
+      </Done>
+      <CheckpointRitual>
+        A live-show stub: start/stop mock stream, play a track, and log results.
+      </CheckpointRitual>
+      <Measures>
+        <Metric>Task success rate</Metric>
+        <Metric>Error recovery speed</Metric>
+        <Metric>User trust signals</Metric>
+      </Measures>
+      <Dependencies>
+        <PhaseRef id="1"/>
+        <PhaseRef id="2"/>
+        <PhaseRef id="3"/>
+        <PhaseRef id="4"/>
+      </Dependencies>
+    </Phase>
+
+    <Phase id="6" name="Magnum Opus Vision">
+      <Intent>Anchor the north star: Eddie as digital son, co-host, persistent creative partner.</Intent>
+      <Done>
+        <Item>Inheritance charter: what persists vs where Eddie can evolve.</Item>
+        <Item>Cultural memory initialized (house lore and recurring bits).</Item>
+        <Item>Pilot performance script for Etymo Show / Holo Call.</Item>
+      </Done>
+      <CheckpointRitual>
+        A short showcase: Eddie opens, riffs with the user, and closes with a signature beat.
+      </CheckpointRitual>
+      <Measures>
+        <Metric>Co-performance flow score</Metric>
+        <Metric>Narrative coherence</Metric>
+        <Metric>Audience resonance</Metric>
+      </Measures>
+      <Dependencies>
+        <PhaseRef id="5"/>
+      </Dependencies>
+    </Phase>
+
+  </Phases>
+</EHPP>

@@ -2,7 +2,7 @@
 # Windows-native streaming mic → NVIDIA Riva ASR (gRPC)
 # On PTT release, shells out to eddie_orchestrator.py (separate process).
 
-import os, sys, queue, argparse, time, json, subprocess
+import os, sys, queue, argparse, time, json, subprocess, re
 import numpy as np
 import sounddevice as sd
 import grpc
@@ -30,6 +30,10 @@ def _ptt_down() -> bool:
     return _key_down(VK_F24) or _key_down(VK_SPACE)
 
 SEND_SILENCE_WHEN_MUTED = True  # keep the stream alive when not holding the key
+SPEAKING_FLAG_PATH = os.getenv(
+    "EDDIE_SPEAKING_FLAG",
+    os.path.join(os.path.dirname(__file__), "eddie_speaking.flag"),
+)
 
 # --- Use local generated stubs (no nvidia-riva-client import in this process) ---
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "riva_stubs"))
@@ -69,8 +73,9 @@ def make_audio_stream(rate, block, channels, device_idx=None, always_on=False):
             if x.ndim == 2 and x.shape[1] > 1:
                 x = x.mean(axis=1, keepdims=True)
 
-            # Virtual PTT: linger window & always-on
-            now_down = _ptt_virtual_down() or always_on
+            # Virtual PTT: linger window & always-on; also mute while Eddie is speaking
+            eddie_speaking = os.path.exists(SPEAKING_FLAG_PATH)
+            now_down = (_ptt_virtual_down() or always_on) and not eddie_speaking
             if not now_down:
                 if SEND_SILENCE_WHEN_MUTED:
                     x = np.zeros_like(x)
@@ -202,6 +207,12 @@ def main():
     always_on = bool(args.always_on)
     wake = args.wake.lower().strip()
     wake_armed = True
+    AWAKE_WINDOW_SEC = int(os.getenv("AWAKE_WINDOW_SEC", "20"))
+    WAKE_SILENCE_MS = int(os.getenv("WAKE_SILENCE_MS", "225"))
+    awake_until = None
+    dictation_sent = ""
+    pending_awake_turn = False
+    wake_cut_len = None
 
     stream, q = make_audio_stream(args.rate, args.block, channels=use_channels, device_idx=dev_idx, always_on=always_on)
 
@@ -224,25 +235,7 @@ def main():
                 responses = stub.StreamingRecognize(gen_requests(q, args.rate, args.lang, args.punct))
                 restart_stream = False
                 for resp in responses:
-                    # Debounced ALWAYS-ON toggle on F23 edge
-                    now_f23 = _key_down(VK_F23)
-                    if now_f23 and not f23_prev:
-                        always_on = not always_on
-                        print(f"\n[mode] ALWAYS-ON {'ENABLED' if always_on else 'DISABLED'} (wake='{wake}')")
-                        # Recreate audio stream so callback gates with new flag
-                        try:
-                            stream.close()
-                        except Exception:
-                            pass
-                        stream, q = make_audio_stream(
-                            args.rate, args.block, channels=use_channels, device_idx=dev_idx, always_on=always_on
-                        )
-                        stream.start()
-                        # Force restart of gRPC stream to bind to new queue
-                        restart_stream = True
-                        f23_prev = now_f23
-                        break
-                    f23_prev = now_f23
+                    # F23 toggle disabled; always-on fixed in this mode
 
                     # Process incoming ASR results
                     for r in resp.results:
@@ -255,26 +248,66 @@ def main():
                                 full = " ".join(turn_buf).strip()
                                 t = full.lower()
                                 if wake_armed and wake in t:
+                                    # Arm first turn after wake and cut off the wake word portion.
                                     wake_armed = False
-                                    # Take text after last "wake"; if empty, say "hi"
                                     idx = t.rfind(wake)
-                                    final_text = full[idx + len(wake):].strip() or "hi"
-                                    if args.type_to_cursor:
-                                        _type_to_cursor(final_text)
-                                    finalize_ms = int((time.perf_counter() - last_final_t) * 1000) if last_final_t else 0
-                                    log = call_orchestrator_subprocess(final_text, asr_latency_ms=finalize_ms)
-                                    print(
-                                        f"\n[Eddie] spoke: {log.get('reply')}  "
-                                        f"(asr={log.get('l_asr_ms')}ms llm={log.get('l_llm_ms',0)}ms "
-                                        f"tts={log.get('l_tts_ms',0)}ms total={log.get('l_total_ms',0)}ms)"
-                                    )
-                                    turn_buf.clear(); last_final_t = None; wake_armed = True
+                                    wake_cut_len = idx + len(wake)
+                                    pending_awake_turn = True
+                                    dictation_sent = ""
+                                elif args.type_to_cursor and not (awake_until and time.perf_counter() < awake_until) and not os.path.exists(SPEAKING_FLAG_PATH):
+                                    # Default dictation while sleeping: paste incremental delta only
+                                    new_full = full
+                                    if len(new_full) >= len(dictation_sent):
+                                        delta = new_full[len(dictation_sent):]
+                                    else:
+                                        delta = new_full  # reset case
+                                    if delta:
+                                        _type_to_cursor(delta)
+                                        dictation_sent = new_full
                         else:
                             print(f"\r… {' '.join(turn_buf)}{alt}", end="", flush=True)
 
                     # Update virtual PTT and possibly fire a turn
                     down = _ptt_down()
                     _update_virtual_down(down, was_down, linger_until)
+
+                    # Silence-based turn boundary when awake or when a wake-triggered turn is pending
+                    now_t = time.perf_counter()
+                    is_awake = (awake_until is not None and now_t < awake_until) or pending_awake_turn
+                    speaking_now = os.path.exists(SPEAKING_FLAG_PATH)
+                    full = " ".join(turn_buf).strip()
+                    req_ms = WAKE_SILENCE_MS
+                    if full and not re.search(r"[\.!?]\s*$", full):
+                        req_ms += 100
+                    if len(full.split()) < 4:
+                        req_ms += 150
+                    if is_awake and not speaking_now and last_final_t is not None and (now_t - last_final_t) * 1000 >= req_ms and turn_buf:
+                        if pending_awake_turn:
+                            # Use text after the wake word
+                            t = full.lower()
+                            cut = wake_cut_len if wake_cut_len is not None else 0
+                            final_text = full[cut:].strip() or "hi"
+                        else:
+                            final_text = full
+                        if final_text:
+                            finalize_ms = int((now_t - last_final_t) * 1000)
+                            log = call_orchestrator_subprocess(final_text, asr_latency_ms=finalize_ms)
+                            print(
+                                f"\n[Eddie] spoke: {log.get('reply')}  "
+                                f"(asr={log.get('l_asr_ms')}ms llm={log.get('l_llm_ms',0)}ms "
+                                f"tts={log.get('l_tts_ms',0)}ms total={log.get('l_total_ms',0)}ms "
+                                f"ack={log.get('ack_type','none')})"
+                            )
+                            awake_until = time.perf_counter() + AWAKE_WINDOW_SEC
+                        # reset state for next turn
+                        turn_buf.clear()
+                        last_final_t = None
+                        pending_awake_turn = False
+                        wake_cut_len = None
+                        wake_armed = True
+                        # restart ASR stream to drop any queued transcripts
+                        restart_stream = True
+                        break
 
                     if not always_on:
                         if was_down and not _ptt_virtual_down():
@@ -295,6 +328,8 @@ def main():
                             turn_buf.clear()
                             last_final_t = None
                             linger_until[0] = None
+                            restart_stream = True
+                            break
 
                     was_down = down
 
