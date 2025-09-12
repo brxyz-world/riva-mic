@@ -2,7 +2,7 @@
 # Orchestrates: ASR(final) -> Router -> Ollama(Qwen) -> Riva TTS (Male-1)
 # Fast-ACK ("Okay.") if LLM > ACK_THRESHOLD_MS, with replacement. JSONL logging.
 
-import os, json, time, threading, queue, re, sys, wave, tempfile
+import os, json, time, threading, queue, re, sys, wave, tempfile, random
 from datetime import datetime
 from typing import Optional, Tuple
 
@@ -14,9 +14,16 @@ VOICE_NAME          = os.getenv("VOICE_NAME", "English-US.Male-1")
 LOG_PATH            = os.getenv("EDDIE_LOG", os.path.join(os.getcwd(), "eddie_turns.log.jsonl"))
 ACK_THRESHOLD_MS    = int(os.getenv("ACK_THRESHOLD_MS", "950"))          # tune 900–1100ms
 REPLACE_WINDOW_MS   = int(os.getenv("REPLACE_WINDOW_MS", "2000"))
-MAX_REPLY_CHARS     = int(os.getenv("MAX_REPLY_CHARS", "120"))
+MAX_REPLY_CHARS     = int(os.getenv("MAX_REPLY_CHARS", "240"))
 EDDIE_DEBUG_WAV     = os.getenv("EDDIE_DEBUG_WAV", "")                   # if set, write every wav here
 OPEN_WAV_APP        = os.getenv("EDDIE_OPEN_WAV", "0") != "0"            # default OFF to reduce latency
+SPEAKING_FLAG_PATH  = os.getenv(
+    "EDDIE_SPEAKING_FLAG",
+    os.path.join(os.path.dirname(__file__), "eddie_speaking.flag"),
+)
+FILLER_FIRST_MS     = int(os.getenv("FILLER_FIRST_MS", "1000"))          # don't emit filler before 1s
+FILLER_POST_PAUSE_MS= int(os.getenv("FILLER_POST_PAUSE_MS", "150"))      # pause after filler completes
+FILLER_PROB         = float(os.getenv("FILLER_PROB", "0.4"))             # chance to emit any filler
 
 # --- Python deps you need in your venv ---
 # pip install nvidia-riva-client==2.19.* requests simpleaudio
@@ -38,15 +45,25 @@ except Exception as e:
 def now_iso() -> str:
     return datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
 
-def clip_one_sentence(text: str, max_chars: int = 120) -> str:
-    # Keep the first sentence-ish; fallback to hard cap.
-    clean = re.sub(r'\s+', ' ', text).strip()
-    # Split on common sentence enders
-    parts = re.split(r'(?<=[\.!?])\s+', clean)
-    first = parts[0] if parts else clean
-    if len(first) <= max_chars:
-        return first
-    return first[:max_chars].rstrip()
+def clip_one_sentence(text: str, max_chars: int = 240) -> str:
+    # Allow up to two sentences within max_chars; fallback to hard cap.
+    clean = re.sub(r"\s+", " ", (text or "")).strip()
+    if not clean:
+        return ""
+    parts = re.split(r"(?<=[\.!?])\s+", clean)
+    acc = []
+    total = 0
+    for s in parts:
+        if not s:
+            continue
+        candidate_len = total + (1 if acc else 0) + len(s)
+        if len(acc) < 2 and candidate_len <= max_chars:
+            acc.append(s)
+            total = candidate_len
+        else:
+            break
+    out = " ".join(acc) if acc else parts[0]
+    return out[:max_chars].rstrip()
 
 def norm(s: str) -> str:
     return re.sub(r'[^a-z0-9\s]', '', s.casefold())
@@ -164,21 +181,27 @@ class AudioPlayer:
 
 # ---------------- Ollama LLM ----------------
 
+# Updated prompt allowing slightly longer, still concise replies
+SYSTEM_PROMPT_V2 = (
+    "You are Eddie: concise, neutral, fast. "
+    "Reply in 1-2 sentences (<=240 characters). Keep it clear."
+)
+
 SYSTEM_PROMPT = (
     "You are Eddie — concise, neutral, and fast. "
     "Reply in ONE sentence (<=120 characters). No emojis, no filler."
 )
 
-def call_ollama_generate(ollama_url: str, model: str, user_text: str, timeout: float = 6.0) -> str:
+def call_ollama_generate(ollama_url: str, model: str, user_text: str, timeout: float = 9.0) -> str:
     """Blocking call; returns model text (may be long — we clip later)."""
     payload = {
         "model": model,
         "prompt": user_text,
-        "system": SYSTEM_PROMPT,
+        "system": SYSTEM_PROMPT_V2,
         "stream": False,
         "options": {
             "temperature": 0.3,
-            "num_predict": 60,
+            "num_predict": 160,
             "top_p": 0.9,
             "repeat_penalty": 1.05,
             "stop": ["\n"]
@@ -202,6 +225,21 @@ class EddieOrchestrator:
             _ = self.tts.synth("ok", sample_rate=44100)
         except Exception:
             pass
+        # Fillers (non-lexical acknowledgments), weighted; kept internal (XML is documentation-only)
+        self._fillers: list[tuple[str, float]] = [
+            ("Hm", 0.6), ("Hmm", 0.3), ("Uh", 0.1)
+        ]
+        total_w = sum(w for _, w in self._fillers) or 1.0
+        self._filler_texts = [t for t, _ in self._fillers]
+        self._filler_weights = [w/total_w for _, w in self._fillers]
+        self._ack_pcm = {}
+        for _ack in self._filler_texts:
+            try:
+                self._ack_pcm[_ack] = self.tts.synth(_ack, sample_rate=44100)
+            except Exception:
+                self._ack_pcm[_ack] = None
+
+    # XML is not parsed at runtime; the development map is documentation only.
 
     def _speak(self, text: str) -> Tuple[int, object]:
         t0 = time.perf_counter()
@@ -211,6 +249,29 @@ class EddieOrchestrator:
         l_tts_ms = int((t1 - t0) * 1000)
         return l_tts_ms, play_obj
 
+    def _play_ack(self, text: str):
+        """Play a pre-synthesized ACK (fallback to synth if needed). Returns a play handle."""
+        pcm = self._ack_pcm.get(text)
+        try:
+            if pcm:
+                return self.player.play_pcm16le(pcm)
+        except Exception:
+            pass
+        # Fallback if pre-synth failed
+        _, play_obj = self._speak(text)
+        return play_obj
+
+    def _set_speaking(self, on: bool):
+        try:
+            if on:
+                with open(SPEAKING_FLAG_PATH, "w", encoding="utf-8") as f:
+                    f.write(now_iso())
+            else:
+                if os.path.exists(SPEAKING_FLAG_PATH):
+                    os.remove(SPEAKING_FLAG_PATH)
+        except Exception:
+            pass
+
     def handle_final_transcript(self, final_text: str, asr_latency_ms: int = 0) -> dict:
         turn_start = time.perf_counter()
         ts_iso = now_iso()
@@ -219,6 +280,7 @@ class EddieOrchestrator:
         # 1) Router — instant
         routed_reply = router_response(final_text)
         if routed_reply:
+            self._set_speaking(True)
             l_tts_ms, play_obj = self._speak(routed_reply)
             first_audio_ms = int((time.perf_counter() - turn_start) * 1000)
             log = {
@@ -232,17 +294,21 @@ class EddieOrchestrator:
                 "router": True,
                 "ack": False,
                 "ack_replaced": False,
+                "ack_type": "none",
+                "route": "router",
                 "voice": VOICE_NAME,
             }
             self._append_log(log)
             # NEW: keep process alive until the router audio finishes (fix silent one-shot)
             wait_play(play_obj)
+            self._set_speaking(False)
             return log
 
-        # 2) Else LLM with fast-ACK
+        # 2) Else LLM with optional, randomized filler
         ack_sent = False
         ack_replaced = False
         ack_play = None
+        ack_type = "none"  # none or filler text (e.g., hm/hmm/uh)
         l_llm_ms = 0
 
         # Fire LLM in a thread so we can ACK if it drags
@@ -265,29 +331,39 @@ class EddieOrchestrator:
         thread = threading.Thread(target=llm_worker, daemon=True)
         thread.start()
 
-        # Wait up to ACK_THRESHOLD_MS for LLM
+        # Wait up to FILLER_FIRST_MS for LLM
         try:
-            resp = llm_out_q.get(timeout=ACK_THRESHOLD_MS / 1000.0)
-            l_llm_ms = llm_timing.get("ms", ACK_THRESHOLD_MS)
+            resp = llm_out_q.get(timeout=FILLER_FIRST_MS / 1000.0)
+            l_llm_ms = llm_timing.get("ms", FILLER_FIRST_MS)
         except queue.Empty:
-            # Send fast ACK
-            ack_sent = True
-            _, ack_play = self._speak("Okay.")
-            # Now wait; replacement handled below
-            resp = llm_out_q.get()
-            l_llm_ms = llm_timing.get("ms", 0)
+            # Decide whether to emit a filler at all (prefer silence sometimes)
+            if random.random() < max(0.0, min(1.0, FILLER_PROB)):
+                filler = random.choices(self._filler_texts, weights=self._filler_weights, k=1)[0]
+                ack_type = filler.lower()
+                ack_sent = True
+                self._set_speaking(True)
+                ack_play = self._play_ack(filler)
+                # Continue waiting for LLM while filler plays; if ready early, still pause after
+                try:
+                    resp = llm_out_q.get(timeout=ACK_THRESHOLD_MS / 1000.0)
+                except queue.Empty:
+                    resp = llm_out_q.get()
+                l_llm_ms = llm_timing.get("ms", 0)
+            else:
+                # No filler; just wait to completion
+                resp = llm_out_q.get()
+                l_llm_ms = llm_timing.get("ms", 0)
 
-        # Prepare final reply (clip to 1 sentence/120 chars)
+        # Prepare final reply (clip to <= MAX_REPLY_CHARS)
         final_reply = clip_one_sentence(resp, MAX_REPLY_CHARS)
 
-        # If ACK is still playing, stop & replace
+        # If we played a filler, let it finish and add a small natural pause
         if ack_sent and ack_play:
-            try:
-                self.player.stop(ack_play)
-                ack_replaced = True
-            except Exception:
-                pass
+            wait_play(ack_play)
+            time.sleep(max(0, FILLER_POST_PAUSE_MS) / 1000.0)
+            self._set_speaking(False)
 
+        self._set_speaking(True)
         l_tts_ms, play_obj_final = self._speak(final_reply)
         first_audio_ms = int((time.perf_counter() - turn_start) * 1000)
 
@@ -302,11 +378,14 @@ class EddieOrchestrator:
             "router": False,
             "ack": ack_sent,
             "ack_replaced": ack_replaced,
+            "ack_type": ack_type,
+            "route": "llm",
             "voice": VOICE_NAME,
         }
         self._append_log(log)
         # NEW: keep process alive until final audio finishes (fix silent one-shot)
         wait_play(play_obj_final)
+        self._set_speaking(False)
         return log
 
     def _append_log(self, obj: dict):

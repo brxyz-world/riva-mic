@@ -104,8 +104,8 @@ try {
 } catch { }
 
 Write-Host ""
-Write-Host "[*] Starting mic:  hold F24 (or SPACE) to talk; release to hear Eddie."
-Write-Host "    Press F23 to toggle ALWAYS-ON (wake word: $($env:EDDIE_WAKE))."
+Write-Host "[*] Starting mic: say '$($env:EDDIE_WAKE)' to wake Eddie; he stays awake ~20s after each reply."
+Write-Host "    When asleep, your speech pastes at the active cursor."
 Write-Host "    Press Ctrl+C to exit."
 Write-Host ""
 
