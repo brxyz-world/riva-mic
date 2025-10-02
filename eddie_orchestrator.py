@@ -35,6 +35,7 @@ SPEAKING_FLAG_PATH  = os.getenv(
 FILLER_FIRST_MS     = int(os.getenv("FILLER_FIRST_MS", "1000"))          # don't emit filler before 1s
 FILLER_POST_PAUSE_MS= int(os.getenv("FILLER_POST_PAUSE_MS", "150"))      # pause after filler completes
 FILLER_PROB         = float(os.getenv("FILLER_PROB", "0.4"))             # chance to emit any filler
+MOOD_LOCK           = os.getenv("MOOD_LOCK", "").strip()
 
 # --- Python deps you need in your venv ---
 # pip install nvidia-riva-client==2.19.* requests simpleaudio
@@ -55,6 +56,11 @@ except Exception as e:
 
 def now_iso() -> str:
     return datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+
+def local_datetime_line() -> str:
+    dt = datetime.now()
+    # Windows-safe formatting; remove leading zeros for a natural read.
+    return dt.strftime("It's %A, %B %d, %Y at %I:%M %p").replace(" 0", " ")
 
 def clip_one_sentence(text: str, max_chars: int = 240) -> str:
     # Allow up to two sentences within max_chars; fallback to hard cap.
@@ -194,10 +200,12 @@ class EddieOrchestrator:
         except Exception:
             pass
         # Load persona (system prompt, fillers, ACK, hiccup/fallback, router)
-        self._router_rules: list[tuple[list[str], str, Optional[str]]] = []
+        self._router_rules: list[tuple[list[str], list[str], Optional[list[float]], Optional[str]]] = []
         self._fillers: list[tuple[str, float]] = []
         self._hiccup_line: str = ""
         self._fallback_line: str = ""
+        self._exit_lines = {"clingy": "", "signoff": ""}; self._ep_clinginess = 0.2
+        self._ep_insistence_words = ["really", "now", "urgent"]; self._exit_state = {"stage": 0, "used": False}
         self._twf_max = 1
         self._twf_tier_ms = ACK_THRESHOLD_MS
         self._load_persona_from_xml()
@@ -247,8 +255,32 @@ class EddieOrchestrator:
 
             # System prompt
             sp = root.find('.//Personality/SystemPrompt')
-            if sp is not None and (sp.text or '').strip():
-                globals()['SYSTEM_PROMPT_V2'] = (sp.text or '').strip()
+            if sp is not None:
+                base_sp = (sp.text or '').strip()
+                if base_sp:
+                    globals()['SYSTEM_PROMPT_V2'] = base_sp
+                # Mood add-on via MOOD_LOCK or daily schedule
+                mood_id = (MOOD_LOCK or '').strip()
+                if not mood_id:
+                    now = datetime.now(); mins = now.hour*60 + now.minute
+                    if mins >= 21*60 or mins < 7*60: mood_id = 'TIRED_NIGHT'
+                    elif mins < 11*60: mood_id = 'ENERGIZED_AM'
+                    elif mins < 12*60: mood_id = 'MID_MORNING_DIP'
+                    elif mins < 14*60: mood_id = 'POST_LUNCH'
+                    elif mins < 16*60+30: mood_id = 'IRRITABLE_SIESTA'
+                    elif mins < 19*60: mood_id = 'EVENING_NORMAL'
+                    else: mood_id = 'CONTENT_EVE'
+                if mood_id:
+                    moods = root.find('.//Personality/Moods')
+                    if moods is not None:
+                        for m in moods.findall('Mood'):
+                            if (m.get('id') or '').strip() == mood_id:
+                                add = (m.text or '').strip()
+                                if add:
+                                    globals()['SYSTEM_PROMPT_V2'] = (base_sp + ' ' + add).strip()
+                                    try: self._mood_id = mood_id
+                                    except Exception: pass
+                                break
 
             # Fillers and timing (env wins if set)
             fill = root.find('.//Personality/Fillers')
@@ -298,27 +330,74 @@ class EddieOrchestrator:
             f = root.find('.//Personality/Fallback')
             if f is not None:
                 self._fallback_line = (f.get('line') or '').strip()
+            ep = root.find('.//Personality/ExitPolicy')
+            if ep is not None:
+                val = ep.get('clinginess')
+                if val:
+                    try:
+                        self._ep_clinginess = max(0.0, min(1.0, float(val)))
+                    except Exception:
+                        pass
+                words = (ep.get('insistenceWords') or '').strip()
+                if words:
+                    self._ep_insistence_words = [w.strip() for w in words.split('|') if w.strip()]
+            lines = root.find('.//Personality/ExitLines')
+            if lines is not None:
+                for key in ("clingy", "signoff"):
+                    val = (lines.get(key) or '').strip()
+                    if val:
+                        self._exit_lines[key] = val
 
             # Router rules
             rules = []
             for rule in root.findall('.//Personality/Router/Rule'):
                 keys = (rule.get('keys') or '').strip()
-                reply = (rule.get('reply') or '').strip()
+                reply_attr = (rule.get('reply') or '').strip()
                 tool = rule.get('tool')
-                if keys and reply:
+                weights_attr = rule.get('replyWeights')
+                if keys and reply_attr:
                     key_list = [k.strip().casefold() for k in keys.split('|') if k.strip()]
-                    rules.append((key_list, reply, tool))
+                    replies = [r.strip() for r in reply_attr.split('|') if r.strip()]
+                    if not replies:
+                        continue
+                    weights = None
+                    if weights_attr:
+                        parts = [w.strip() for w in weights_attr.split('|')]
+                        if len(parts) == len(replies):
+                            try:
+                                weights = [float(w) for w in parts]
+                            except ValueError:
+                                weights = None
+                    rules.append((key_list, replies, weights, tool))
             self._router_rules = rules
         except Exception as e:
             print(f"[PersonaXML] load failed: {e}", file=sys.stderr)
             self._router_rules = []
 
-    def _router_response(self, text: str) -> Optional[tuple[str, Optional[str]]]:
+    def _router_response(self, text: str) -> Optional[tuple[list[str], Optional[list[float]], Optional[str]]]:
         t = norm(text)
-        for keys, reply, tool in self._router_rules:
+        for keys, replies, weights, tool in self._router_rules:
             if any(k in t for k in keys):
-                return reply, tool
+                return replies, weights, tool
         return None
+
+    def _exit_intent_urgent(self, text: str) -> bool:
+        return any(w in norm(text) for w in self._ep_insistence_words)
+
+    def _maybe_exit_override(self, text: str) -> tuple[bool, str, bool, str]:
+        state = self._exit_state
+        urgent = self._exit_intent_urgent(text)
+        if state["stage"] == 0 and not urgent and not state["used"] and random.random() < self._ep_clinginess:
+            state["stage"] = 1; state["used"] = True
+            return True, self._exit_lines.get("clingy") or self._fallback_line, False, "clingy"
+        if state["stage"] == 1:
+            state["stage"] = 2
+            if urgent:
+                return False, "", True, "insist"
+            return True, self._exit_lines.get("signoff") or self._fallback_line, True, "canned_signoff"
+        if state["stage"] < 2:
+            state["stage"] = 2
+        return False, "", True, "normal"
 
     def _fire_tool_async(self, tool: str, text: str):
         if not TOOLS_URL:
@@ -338,10 +417,35 @@ class EddieOrchestrator:
         # 1) Router — instant
         rr = self._router_response(final_text)
         if rr:
-            reply, tool = rr; reply = clip_one_sentence(reply, MAX_REPLY_CHARS)
+            replies, weights, tool = rr
+            selected = ""
+            if len(replies) == 1:
+                selected = replies[0]
+            elif len(replies) > 1:
+                selected = random.choices(replies, weights=weights, k=1)[0] if weights else random.choice(replies)
+            reply = clip_one_sentence(selected, MAX_REPLY_CHARS)
+            exit_request = False; exit_reason = ""
+            if tool == "self.exit":
+                handled, override, exit_request, exit_reason = self._maybe_exit_override(final_text)
+                if handled and override:
+                    reply = clip_one_sentence(override, MAX_REPLY_CHARS)
+                exit_stage = self._exit_state["stage"]
+            # Clock tool: tailor reply before speaking
+            if tool == "clock.now":
+                tt = norm(final_text)
+                dt = datetime.now()
+                if "time" in tt:
+                    reply = dt.strftime("It's %I:%M %p").replace(" 0", " ").replace("It's 0", "It's ")
+                elif "day" in tt:
+                    reply = dt.strftime("It's %A")
+                elif "date" in tt or "today" in tt:
+                    reply = dt.strftime("It's %B %d, %Y").replace(" 0", " ")
+                else:
+                    reply = local_datetime_line()
             self._set_speaking(True)
             l_tts_ms, play_obj = self._speak(reply)
-            if tool: self._fire_tool_async(tool, final_text)
+            if tool and tool not in ("self.exit", "clock.now"):
+                self._fire_tool_async(tool, final_text)
             first_audio_ms = int((time.perf_counter() - turn_start) * 1000)
             log = {
                 "ts": ts_iso,
@@ -358,6 +462,11 @@ class EddieOrchestrator:
                 "route": "router",
                 "voice": VOICE_NAME,
             }
+            try: log["mood"] = getattr(self, "_mood_id", "")
+            except Exception: pass
+            log["router_variant"] = selected
+            if tool == "self.exit":
+                log.update({"request_exit": exit_request, "exit_stage": exit_stage, "exit_reason": exit_reason})
             self._append_log(log)
             wait_play(play_obj)
             self._set_speaking(False)
@@ -447,6 +556,8 @@ class EddieOrchestrator:
             "route": "llm",
             "voice": VOICE_NAME,
         }
+        try: log["mood"] = getattr(self, "_mood_id", "")
+        except Exception: pass
         if twf_engaged:
             log["twf_tiers_used"] = twf_tiers_used
             log["twf_total_extra_ms"] = twf_total_extra_ms

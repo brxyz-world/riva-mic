@@ -22,6 +22,7 @@ SPEAKING_FLAG_PATH = os.getenv(
     "EDDIE_SPEAKING_FLAG",
     os.path.join(os.path.dirname(__file__), "eddie_speaking.flag"),
 )
+ECHO_SUPPRESS_MS = int(os.getenv("ECHO_SUPPRESS_MS", "1200"))
 
 # --- Use local generated stubs (no nvidia-riva-client import in this process) ---
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "riva_stubs"))
@@ -225,6 +226,18 @@ def main():
                                 f"tts={log.get('l_tts_ms',0)}ms total={log.get('l_total_ms',0)}ms "
                                 f"ack={log.get('ack_type','none')})"
                             )
+                            if log.get("request_exit"):
+                                # Wait until speaking flag clears (or becomes stale), then exit
+                                while True:
+                                    if not os.path.exists(SPEAKING_FLAG_PATH):
+                                        sys.exit(0)
+                                    try:
+                                        age_ms = (time.time() - os.path.getmtime(SPEAKING_FLAG_PATH)) * 1000.0
+                                    except Exception:
+                                        age_ms = 0
+                                    if age_ms >= ECHO_SUPPRESS_MS:
+                                        sys.exit(0)
+                                    time.sleep(0.1)
                         turn_buf.clear()
                         last_final_t = None
                         dictation_sent = ""
