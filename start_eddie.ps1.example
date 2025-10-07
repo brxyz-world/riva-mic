@@ -1,0 +1,51 @@
+<#
+  Example startup script WITHOUT secrets.
+  Copy to `start_eddie.ps1` locally and set environment variables externally (user env, .env, or secret manager).
+
+  Usage:
+    # PowerShell
+    # Set environment variables in your profile or before running
+    #   $env:OPENAI_API_KEY = "..."
+    #   $env:OLLAMA_URL = "http://127.0.0.1:11434"
+    #   $env:RIVA_SERVER = "localhost:50051"
+    # Then run:
+    #   pwsh -File .\start_eddie.ps1
+ #>
+
+Param(
+  [switch]$VerboseMode
+)
+
+function Require-Env($name) {
+  $val = [Environment]::GetEnvironmentVariable($name)
+  if ([string]::IsNullOrWhiteSpace($val)) {
+    throw "Environment variable '$name' is not set."
+  }
+  return $val
+}
+
+if ($VerboseMode) { $VerbosePreference = 'Continue' }
+
+# Required environment variables (set these outside of Git)
+$OPENAI_API_KEY = Require-Env 'OPENAI_API_KEY'
+
+# Optional/config
+$OLLAMA_URL = [Environment]::GetEnvironmentVariable('OLLAMA_URL')
+if (-not $OLLAMA_URL) { $OLLAMA_URL = 'http://127.0.0.1:11434' }
+
+$RIVA_SERVER = [Environment]::GetEnvironmentVariable('RIVA_SERVER')
+if (-not $RIVA_SERVER) { $RIVA_SERVER = 'localhost:50051' }
+
+Write-Host "Starting Eddie with:" -ForegroundColor Cyan
+Write-Host ("  OLLAMA_URL = {0}" -f $OLLAMA_URL)
+Write-Host ("  RIVA_SERVER = {0}" -f $RIVA_SERVER)
+Write-Host "  OPENAI_API_KEY = [set]"
+
+# Example: export vars for child process only
+$env:OPENAI_API_KEY = $OPENAI_API_KEY
+$env:OLLAMA_URL = $OLLAMA_URL
+$env:RIVA_SERVER = $RIVA_SERVER
+
+# Launch the orchestrator (adjust as needed)
+python .\eddie_orchestrator.py
+
