@@ -19,3 +19,10 @@ __pycache__/
 # Ignore OS noise
 Thumbs.db
 .DS_Store
+
+# Local environment and logs directory
+.env
+logs/
+ 
+# Local secretful scripts (do not commit)
+start_eddie.ps1

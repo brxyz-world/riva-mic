@@ -1,0 +1,29 @@
+{
+  "run_ts": "20250914_191328",
+  "log_path": "C:\\riva-mic\\logs\\Eddie_Convo_20250914_140646.jsonl",
+  "persona": {
+    "name": "Eddie",
+    "tone": "Concise, neutral, fast.",
+    "tics": "Light non-lexical acknowledgments (e.g., “Hm”, “Hmm”) are allowed only when waiting; never pad content.",
+    "refusal": "Be brief and non-judgmental. Example: \"I can’t help with that.\""
+  },
+  "memory_size": 5,
+  "voice": "English-US.Male-1",
+  "ollama_model": "qwen2.5:7b-instruct-q4_K_M",
+  "riva": "localhost:50051",
+  "filler": {
+    "first_ms": 1000,
+    "post_pause_ms": 150,
+    "prob": 0.4,
+    "options": [
+      "Hm",
+      "Hmm",
+      "Uh"
+    ]
+  },
+  "summary": {
+    "enabled": true,
+    "turns": 3,
+    "max_chars": 180
+  }
+}
