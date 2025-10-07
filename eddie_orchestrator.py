@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from typing import Optional, Tuple
 from pathlib import Path
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 # --- Config via env / sane defaults ---
 RIVA_SPEECH_API_URL = os.getenv("RIVA_SPEECH_API_URL", "localhost:50051")
@@ -36,6 +37,14 @@ FILLER_FIRST_MS     = int(os.getenv("FILLER_FIRST_MS", "1000"))          # don't
 FILLER_POST_PAUSE_MS= int(os.getenv("FILLER_POST_PAUSE_MS", "150"))      # pause after filler completes
 FILLER_PROB         = float(os.getenv("FILLER_PROB", "0.4"))             # chance to emit any filler
 MOOD_LOCK           = os.getenv("MOOD_LOCK", "").strip()
+WAKE_BIND          = os.getenv("WAKE_BIND", "127.0.0.1")
+WAKE_PORT          = int(os.getenv("WAKE_PORT", "0"))  # disabled by default; mic owns wake
+WAKE_WINDOW_MS     = int(os.getenv("WAKE_WINDOW_MS", "20000"))
+HUSH_CLOSES_WINDOW = os.getenv("HUSH_CLOSES_WINDOW", "1") != "0"
+HUSH_SILENT_ACK    = os.getenv("HUSH_SILENT_ACK", "0") == "1"
+# Orchestrator no longer owns wake gating; leave empty to avoid gating even if mic uses Porcupine
+PORCUPINE_ACCESS_KEY  = os.getenv("PORCUPINE_ACCESS_KEY", "")
+PORCUPINE_KEYWORD_PATH = os.getenv("PORCUPINE_KEYWORD_PATH", "")
 
 # --- Python deps you need in your venv ---
 # pip install nvidia-riva-client==2.19.* requests simpleaudio
@@ -163,6 +172,39 @@ class AudioPlayer:
             pass
 
 
+
+
+class _WakeHTTPHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.path != "/signal/wake":
+            self.send_error(404)
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        if length:
+            try:
+                self.rfile.read(length)
+            except Exception:
+                pass
+        try:
+            self.server.orchestrator._open_wake_window()
+            body = json.dumps({"ok": True}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception:
+            self.send_error(500)
+
+    def log_message(self, format, *args):
+        return
+
+
+class _WakeHTTPServer(ThreadingHTTPServer):
+    def __init__(self, server_address, orchestrator):
+        super().__init__(server_address, _WakeHTTPHandler)
+        self.orchestrator = orchestrator
+
 # ---------------- Ollama LLM ----------------
 
 # Set from XML at startup
@@ -194,6 +236,18 @@ class EddieOrchestrator:
     def __init__(self):
         self.tts = RivaTTS(RIVA_SPEECH_API_URL, VOICE_NAME)
         self.player = AudioPlayer(sample_rate=44100)
+        self._playback_lock = threading.Lock()
+        self._current_play_obj: Optional[object] = None
+        # Wake gating handled by mic; keep disabled in orchestrator
+        self._wake_required = False
+        self._wake_active = False
+        self._wake_window_ms = max(0, WAKE_WINDOW_MS)
+        self._wake_timer: Optional[threading.Timer] = None
+        self._wake_lock = threading.Lock()
+        self._wake_server = None
+        self._wake_server_thread = None
+        self._wake_active = True  # always allow processing; mic gates upstream
+        self._start_wake_server()  # will no-op when WAKE_PORT == 0
         # warm up TTS so first real turn isn't cold
         try:
             _ = self.tts.synth("ok", sample_rate=44100)
@@ -226,13 +280,15 @@ class EddieOrchestrator:
         audio = self.tts.synth(text, sample_rate=44100)
         t1 = time.perf_counter()
         play_obj = self.player.play_pcm16le(audio)
+        play_obj = self._set_current_play_obj(play_obj)
         l_tts_ms = int((t1 - t0) * 1000)
         return l_tts_ms, play_obj
 
     def _play_ack(self, text: str):
         pcm = self._ack_pcm.get(text)
         try:
-            if pcm: return self.player.play_pcm16le(pcm)
+            if pcm:
+                return self._set_current_play_obj(self.player.play_pcm16le(pcm))
         except Exception:
             pass
         _, play_obj = self._speak(text)
@@ -410,11 +466,14 @@ class EddieOrchestrator:
         threading.Thread(target=_w, daemon=True).start()
 
     def handle_final_transcript(self, final_text: str, asr_latency_ms: int = 0) -> dict:
+        self._stop_playback()
         turn_start = time.perf_counter()
         ts_iso = now_iso()
         final_text = (final_text or "").strip()
 
-        # 1) Router — instant
+        # Wake gating removed: orchestrator always processes when invoked; mic controls wake
+
+        # 1) Router - instant
         rr = self._router_response(final_text)
         if rr:
             replies, weights, tool = rr
@@ -424,13 +483,14 @@ class EddieOrchestrator:
             elif len(replies) > 1:
                 selected = random.choices(replies, weights=weights, k=1)[0] if weights else random.choice(replies)
             reply = clip_one_sentence(selected, MAX_REPLY_CHARS)
-            exit_request = False; exit_reason = ""
+            exit_request = False
+            exit_reason = ""
+            exit_stage = 0
             if tool == "self.exit":
                 handled, override, exit_request, exit_reason = self._maybe_exit_override(final_text)
                 if handled and override:
                     reply = clip_one_sentence(override, MAX_REPLY_CHARS)
                 exit_stage = self._exit_state["stage"]
-            # Clock tool: tailor reply before speaking
             if tool == "clock.now":
                 tt = norm(final_text)
                 dt = datetime.now()
@@ -442,9 +502,11 @@ class EddieOrchestrator:
                     reply = dt.strftime("It's %B %d, %Y").replace(" 0", " ")
                 else:
                     reply = local_datetime_line()
+            if tool == "self.hush":
+                return self._perform_hush(reply, final_text, ts_iso, asr_latency_ms, turn_start)
             self._set_speaking(True)
             l_tts_ms, play_obj = self._speak(reply)
-            if tool and tool not in ("self.exit", "clock.now"):
+            if tool and tool not in ("self.exit", "clock.now", "self.hush"):
                 self._fire_tool_async(tool, final_text)
             first_audio_ms = int((time.perf_counter() - turn_start) * 1000)
             log = {
@@ -462,14 +524,19 @@ class EddieOrchestrator:
                 "route": "router",
                 "voice": VOICE_NAME,
             }
-            try: log["mood"] = getattr(self, "_mood_id", "")
-            except Exception: pass
+            try:
+                log["mood"] = getattr(self, "_mood_id", "")
+            except Exception:
+                pass
             log["router_variant"] = selected
             if tool == "self.exit":
                 log.update({"request_exit": exit_request, "exit_stage": exit_stage, "exit_reason": exit_reason})
             self._append_log(log)
             wait_play(play_obj)
+            self._maybe_clear_play_obj(play_obj)
             self._set_speaking(False)
+            if self._wake_required and self._wake_active:
+                self._reset_wake_timer()
             return log
 
         # 2) Else LLM with optional, randomized filler
@@ -492,8 +559,10 @@ class EddieOrchestrator:
                 resp = (self._hiccup_line or self._fallback_line or "")
             t1 = time.perf_counter()
             llm_timing["ms"] = int((t1 - t0) * 1000)
-            try: llm_out_q.put_nowait(resp)
-            except queue.Full: pass
+            try:
+                llm_out_q.put_nowait(resp)
+            except queue.Full:
+                pass
 
         thread = threading.Thread(target=llm_worker, daemon=True)
         thread.start()
@@ -511,7 +580,8 @@ class EddieOrchestrator:
                     filler = random.choices(
                         self._filler_texts, weights=self._filler_weights, k=1
                     )[0]
-                    ack_type = filler.lower(); ack_sent = True
+                    ack_type = filler.lower()
+                    ack_sent = True
                     self._set_speaking(True)
                     play_obj = self._play_ack(filler)
                     if play_obj:
@@ -534,6 +604,7 @@ class EddieOrchestrator:
         if ack_sent and ack_plays:
             for play_obj in ack_plays:
                 wait_play(play_obj)
+                self._maybe_clear_play_obj(play_obj)
             time.sleep(max(0, FILLER_POST_PAUSE_MS) / 1000.0)
             self._set_speaking(False)
 
@@ -556,14 +627,157 @@ class EddieOrchestrator:
             "route": "llm",
             "voice": VOICE_NAME,
         }
-        try: log["mood"] = getattr(self, "_mood_id", "")
-        except Exception: pass
+        try:
+            log["mood"] = getattr(self, "_mood_id", "")
+        except Exception:
+            pass
         if twf_engaged:
             log["twf_tiers_used"] = twf_tiers_used
             log["twf_total_extra_ms"] = twf_total_extra_ms
         self._append_log(log)
         wait_play(play_obj_final)
+        self._maybe_clear_play_obj(play_obj_final)
         self._set_speaking(False)
+        if self._wake_required and self._wake_active:
+            self._reset_wake_timer()
+        return log
+    def _start_wake_server(self):
+        if getattr(self, "_wake_server", None) is not None:
+            return
+        if not WAKE_BIND or WAKE_PORT <= 0:
+            return
+        try:
+            server = _WakeHTTPServer((WAKE_BIND, WAKE_PORT), self)
+        except Exception as e:
+            print(f"[wake] server not started: {e}", file=sys.stderr)
+            self._wake_server = None
+            return
+        self._wake_server = server
+        thread = threading.Thread(target=server.serve_forever, name="WakeSignalServer", daemon=True)
+        thread.start()
+        self._wake_server_thread = thread
+
+    def _set_current_play_obj(self, play_obj):
+        with self._playback_lock:
+            self._current_play_obj = play_obj
+        return play_obj
+
+    def _maybe_clear_play_obj(self, play_obj):
+        with self._playback_lock:
+            if self._current_play_obj is play_obj:
+                self._current_play_obj = None
+
+    def _stop_playback(self):
+        with self._playback_lock:
+            play_obj = self._current_play_obj
+            self._current_play_obj = None
+        if play_obj:
+            self.player.stop(play_obj)
+        self._set_speaking(False)
+
+    def _open_wake_window(self):
+        if not self._wake_required:
+            return
+        with self._wake_lock:
+            was_active = self._wake_active
+            self._wake_active = True
+            self._start_wake_timer_locked()
+        if not was_active:
+            self._log_event("wake_open", window_ms=self._wake_window_ms)
+
+    def _start_wake_timer_locked(self):
+        if self._wake_timer:
+            try:
+                self._wake_timer.cancel()
+            except Exception:
+                pass
+        if self._wake_window_ms <= 0:
+            self._wake_timer = None
+            return
+        timer = threading.Timer(self._wake_window_ms / 1000.0, self._wake_timeout)
+        timer.daemon = True
+        self._wake_timer = timer
+        timer.start()
+
+    def _wake_timeout(self):
+        self._close_wake_window(reason="timeout")
+
+    def _close_wake_window(self, reason: str = "manual") -> bool:
+        with self._wake_lock:
+            if not self._wake_active:
+                if self._wake_timer:
+                    try:
+                        self._wake_timer.cancel()
+                    except Exception:
+                        pass
+                    self._wake_timer = None
+                return False
+            self._wake_active = False
+            timer = self._wake_timer
+            self._wake_timer = None
+        if timer:
+            try:
+                timer.cancel()
+            except Exception:
+                pass
+        self._log_event("wake_close", reason=reason)
+        return True
+
+    def _reset_wake_timer(self):
+        if not self._wake_required:
+            return
+        with self._wake_lock:
+            if not self._wake_active:
+                return
+            self._start_wake_timer_locked()
+
+    def _perform_hush(self, reply: str, final_text: str, ts_iso: str, asr_latency_ms: int, turn_start: float) -> dict:
+        self._stop_playback()
+        self._log_event("hush", text=final_text)
+        hush_reply = "" if HUSH_SILENT_ACK else reply
+        if hush_reply:
+            self._set_speaking(True)
+            l_tts_ms, play_obj = self._speak(hush_reply)
+            first_audio_ms = int((time.perf_counter() - turn_start) * 1000)
+        else:
+            l_tts_ms = 0
+            play_obj = None
+            first_audio_ms = int((time.perf_counter() - turn_start) * 1000)
+            self._set_speaking(False)
+        if HUSH_CLOSES_WINDOW and self._wake_required:
+            closed = self._close_wake_window(reason="hush")
+        else:
+            closed = False
+        log = {
+            "ts": ts_iso,
+            "text": final_text,
+            "reply": hush_reply,
+            "l_asr_ms": asr_latency_ms,
+            "l_llm_ms": 0,
+            "l_tts_ms": l_tts_ms,
+            "l_total_ms": first_audio_ms,
+            "router": True,
+            "ack": False,
+            "ack_replaced": False,
+            "ack_type": "none",
+            "route": "router",
+            "voice": VOICE_NAME,
+            "tool": "self.hush",
+            "hush": True,
+            "wake_closed": closed,
+            "router_variant": reply,
+        }
+        try:
+            log["mood"] = getattr(self, "_mood_id", "")
+        except Exception:
+            pass
+        self._append_log(log)
+        if play_obj:
+            wait_play(play_obj)
+            self._maybe_clear_play_obj(play_obj)
+            self._set_speaking(False)
+        if self._wake_required and self._wake_active:
+            self._reset_wake_timer()
         return log
 
     def _append_log(self, obj: dict):
@@ -572,6 +786,12 @@ class EddieOrchestrator:
                 f.write(json.dumps(obj, ensure_ascii=False) + "\n")
         except Exception:
             pass
+
+    def _log_event(self, event: str, **extra):
+        payload = {"ts": now_iso(), "event": event}
+        if extra:
+            payload.update(extra)
+        self._append_log(payload)
 
 
 # ---------------- Public API ----------------
@@ -597,3 +817,5 @@ if __name__ == "__main__":
     args = ap.parse_args()
     out = handle_final_transcript(args.text, args.asr_ms)
     print(json.dumps(out, indent=2))
+
+

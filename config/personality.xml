@@ -30,23 +30,24 @@
     <Fallback line="Sorry, I missed that."/>
 
     <ExitPolicy clinginess="0.2" insistenceWords="really|now|urgent"/>
-    <ExitLines clingy="No! Don't leave me." signoff="Catch you later."/>
+    <ExitLines clingy="Oh, for real though?" signoff="Catch you later."/>
 
-    <Prosody>
-      <Preset name="calm" emphasis="low" pace="steady"/>
-      <Preset name="playful" emphasis="medium" pace="brisk"/>
-      <Preset name="solemn" emphasis="low" pace="slow"/>
-    </Prosody>
+    <!-- Standby/wakeWindow now managed by mic, not orchestrator. Kept for reference only.
+         <Standby wakeEnabled="true" wakeWindowMs="20000" idleSilenceMs="5000" /> -->
 
     <Router>
-      <Rule keys="hey eddie|hello eddie" reply="Hey, what's good?|Hi Ben.|Hello buddy" replyWeights="5|3|2"/>
-      <Rule keys="alright I'm gonna go now|okay bye eddie|later eddie|shut the fuck up Eddie" reply="okay bye|later|peace" replyWeights="5|3|2" tool="self.exit"/>
-      <Rule keys="what time is it|what's the time|current time|time now|date|what day is it|today's date" reply="Checking the clock." tool="clock.now"/>
+      <Rule id="R_HELLO" keys="hello eddie" reply="Hey, what's good?|Hi Ben.|Hello buddy" replyWeights="3|2|1"/>
+      <Rule id="R_EXIT" keys="alright I'm gonna go now|bye Eddie|later|later Eddie|shut the fuck up Eddie|shut the fuck up|go away" reply="okay bye|later|peace" replyWeights="5|3|2" tool="self.exit"/>
+      <Rule keys="what time is it|what's the time|time now|date|what day is it|today's date" reply="Checking the clock." tool="clock.now"/>
       <Rule keys="clip that|save that clip|clip last" reply="Clipping the last few seconds." tool="obs.clip"/>
       <Rule keys="start the stream|start stream" reply="Starting your stream." tool="obs.start"/>
       <Rule keys="switch to talking|talking scene" reply="Switching to Talking." tool="obs.scene.talking"/>
       <Rule keys="make a note|note this|remember this" reply="Noted." tool="notes.add"/>
-      <Rule keys="thanks eddie|thank you eddie|thank you" reply="For sure bro.|Of course man, anytime.|Oh yeah for sure no problem." replyWeights="5|3|2"/>
+      <Rule keys="thanks Eddie|thank you Eddie|thank you" reply="For sure bro.|Of course man, anytime.|Oh yeah for sure no problem." replyWeights="5|3|2"/>
+      <Rule id="R_HUSH" keys="ok|okay|alright" reply="Got it.|Alright." replyWeights="3|2" tool="self.hush"/>
+      <Rule keys="notify.dunkey_new" reply="Dunkey just posted '{title}'. Open now or add to Watch-Later?" />
+      <Rule keys="open it now|open it|yeah open it" reply="Opening it." tool="yt.open"/>
+      <Rule keys="add to watch later|save for later" reply="Added to your Watch-Later playlist." tool="yt.playlist.add"/>
     </Router>
 
     <Tools>
@@ -57,6 +58,7 @@
       <Tool name="obs.scene.talking" method="POST" endpointEnv="TOOLS_URL" expects="json"/>
       <Tool name="notes.add" method="POST" endpointEnv="TOOLS_URL" expects="json"/>
       <Tool name="self.exit" note="internal; intercepted by orchestrator (P2.ExPP), no POST"/>
+      <Tool name="self.hush" note="internal; stops speech without exit"/>
     </Tools>
 
     <Retrieval enabledEnv="RETRIEVER_URL" timeoutMs="500" maxSnippets="2" />
@@ -71,6 +73,21 @@
       <Mood id="POST_LUNCH">Practical and steady; mildly positive; focus on utility.</Mood>
       <Mood id="EVENING_NORMAL">Balanced and cooperative; pragmatic and clear.</Mood>
     </Moods>
+
+    <!-- Mood-based scaling of router replyWeights; scale multiplies per-rule weights (omit => 1.0) -->
+    <MoodOverrides>
+      <Mood id="ENERGIZED_AM">
+        <Rule id="R_HELLO" scale="1.10"/>
+        <Rule id="R_EXIT" scale="0.90"/>
+      </Mood>
+      <Mood id="IRRITABLE_SIESTA">
+        <Rule id="R_HELLO" scale="0.90"/>
+        <Rule id="R_EXIT" scale="1.10"/>
+      </Mood>
+      <Mood id="CONTENT_EVE">
+        <Rule id="R_HELLO" scale="1.05"/>
+      </Mood>
+    </MoodOverrides>
   </Personality>
 
   <Measures>

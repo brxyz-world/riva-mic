@@ -3,6 +3,7 @@
 # Streams audio to eddie_orchestrator.py (separate process).
 
 import os, sys, queue, argparse, time, json, subprocess, re
+from datetime import datetime
 import numpy as np
 import sounddevice as sd
 import grpc
@@ -23,6 +24,11 @@ SPEAKING_FLAG_PATH = os.getenv(
     os.path.join(os.path.dirname(__file__), "eddie_speaking.flag"),
 )
 ECHO_SUPPRESS_MS = int(os.getenv("ECHO_SUPPRESS_MS", "1200"))
+WAKE_WINDOW_MS = int(os.getenv("WAKE_WINDOW_MS", "20000"))
+WAKE_FLAG_PATH = os.getenv(
+    "EDDIE_WAKE_FLAG",
+    os.path.join(os.path.dirname(__file__), "eddie_wake.flag"),
+)
 
 # --- Use local generated stubs (no nvidia-riva-client import in this process) ---
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "riva_stubs"))
@@ -33,7 +39,7 @@ import riva_audio_pb2
 
 def resolve_input_device(name_or_index):
     """Return an input device index (or None for default)."""
-    if name_or_index is None:
+    if name_or_index is None or str(name_or_index).strip() == "":
         return None
     try:
         return int(name_or_index)
@@ -45,7 +51,7 @@ def resolve_input_device(name_or_index):
     raise SystemExit(f"[err] input device not found: {name_or_index}")
 
 
-def make_audio_stream(rate, block, channels, device_idx=None):
+def make_audio_stream(rate, block, channels, device_idx=None, is_awake=None):
     """
     Use sd.InputStream (float32) for maximum compatibility on Windows line-in.
     Downmix to mono and convert to int16 PCM bytes for Riva.
@@ -62,12 +68,19 @@ def make_audio_stream(rate, block, channels, device_idx=None):
             if x.ndim == 2 and x.shape[1] > 1:
                 x = x.mean(axis=1, keepdims=True)
 
-            # Pause capture while Eddie is speaking to avoid feedback loops
-            if os.path.exists(SPEAKING_FLAG_PATH):
-                if SEND_SILENCE_WHEN_MUTED:
-                    x = np.zeros_like(x)
-                else:
-                    return
+            # Pause capture while Eddie is speaking (ignore stale flags)
+            try:
+                if os.path.exists(SPEAKING_FLAG_PATH):
+                    age_ms = (time.time() - os.path.getmtime(SPEAKING_FLAG_PATH)) * 1000.0
+                    if age_ms <= ECHO_SUPPRESS_MS:
+                        if SEND_SILENCE_WHEN_MUTED:
+                            x = np.zeros_like(x)
+                        else:
+                            return
+            except Exception:
+                pass
+
+            # Keep ASR/dictation always-on; gate only final handoff to Eddie
 
             y = np.clip(x * 32767.0, -32768, 32767).astype(np.int16)
             q.put(y.tobytes())
@@ -106,6 +119,20 @@ def gen_requests(q, rate, lang, punct):
         if data is None:
             return
         yield riva_asr_pb2.StreamingRecognizeRequest(audio_content=data)
+
+
+def _log_event(event: str, **extra):
+    try:
+        path = os.getenv("EDDIE_LOG", "")
+        if not path:
+            return
+        payload = {"ts": datetime.utcnow().isoformat(timespec="milliseconds") + "Z", "event": event}
+        if extra:
+            payload.update(extra)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def call_orchestrator_subprocess(final_text: str, asr_latency_ms: int = 0) -> dict:
@@ -163,18 +190,90 @@ def main():
     args = ap.parse_args()
 
     dev_idx = resolve_input_device(args.device)
-    use_channels = 1
-    if dev_idx is not None:
-        max_in = max(1, sd.query_devices()[dev_idx].get("max_input_channels", 1))
-        use_channels = 2 if max_in >= 2 else 1
+
+    # Infer a safe channel count for the selected/default input device.
+    # Some Windows host APIs (e.g., WASAPI loopback or certain drivers) require the
+    # requested channel count to exactly match the device's input channel count.
+    try:
+        dev_info = sd.query_devices(dev_idx if dev_idx is not None else None, kind='input')
+        max_in = int(dev_info.get('max_input_channels', 0) or 0)
+    except Exception:
+        dev_info = {}
+        max_in = 0
+
+    use_channels = None
     if args.channels in (1, 2):
-        use_channels = args.channels
+        # Clamp user-requested channels to device capability (if known)
+        if max_in > 0 and args.channels > max_in:
+            print(f"[mic] requested channels={args.channels} > device max={max_in}; clamping to {max_in}")
+            use_channels = max_in
+        else:
+            use_channels = args.channels
+    else:
+        # No explicit channels provided: prefer exact device channel count if known.
+        # Fallback to mono if unknown.
+        use_channels = max_in if max_in > 0 else 1
 
     channel = grpc.insecure_channel(args.server)
     stub = riva_asr_pb2_grpc.RivaSpeechRecognitionStub(channel)
 
     dictation_sent = ""
-    stream, q = make_audio_stream(args.rate, args.block, channels=use_channels, device_idx=dev_idx)
+
+    def _is_awake() -> bool:
+        try:
+            if not os.path.exists(WAKE_FLAG_PATH):
+                return False
+            age = time.time() - os.path.getmtime(WAKE_FLAG_PATH)
+            return (age * 1000.0) <= WAKE_WINDOW_MS
+        except Exception:
+            return False
+
+    def _extend_wake_window():
+        try:
+            if os.path.exists(WAKE_FLAG_PATH):
+                os.utime(WAKE_FLAG_PATH, None)
+                _log_event("wake_extend")
+        except Exception:
+            pass
+
+    # Create stream with chosen channels; if the driver rejects the count, retry once
+    # with the device's reported max channels (or 1 as a last resort).
+    try:
+        stream, q = make_audio_stream(
+            args.rate,
+            args.block,
+            channels=use_channels,
+            device_idx=dev_idx,
+            is_awake=_is_awake,
+        )
+    except Exception as e:
+        msg = str(e)
+        if "Invalid number of channels" in msg or "PaErrorCode -9998" in msg:
+            alt = max_in if max_in > 0 else 1
+            if alt != use_channels:
+                print(f"[mic] {msg} — retrying with channels={alt}")
+                stream, q = make_audio_stream(
+                    args.rate,
+                    args.block,
+                    channels=alt,
+                    device_idx=dev_idx,
+                    is_awake=_is_awake,
+                )
+            else:
+                # Try a minimal mono fallback if even max_in failed
+                if alt != 1:
+                    print(f"[mic] retrying with channels=1")
+                    stream, q = make_audio_stream(
+                        args.rate,
+                        args.block,
+                        channels=1,
+                        device_idx=dev_idx,
+                        is_awake=_is_awake,
+                    )
+                else:
+                    raise
+        else:
+            raise
 
     turn_buf = []
     last_final_t = None
@@ -182,6 +281,7 @@ def main():
     print(f"[mic] connecting to Riva @ {args.server}")
     print("[mic] streaming...  Ctrl+C to stop")
 
+    last_awake = None
     try:
         with stream:
             while True:
@@ -208,6 +308,12 @@ def main():
                             print(f"> {' '.join(turn_buf)}{alt}", end="\r", flush=True)
 
                     now_t = time.perf_counter()
+                    cur_awake = _is_awake()
+                    if last_awake is None:
+                        last_awake = cur_awake
+                    elif cur_awake != last_awake:
+                        _log_event("wake_open" if cur_awake else "wake_close", window_ms=WAKE_WINDOW_MS)
+                        last_awake = cur_awake
                     speaking_now = os.path.exists(SPEAKING_FLAG_PATH)
                     full = " ".join(turn_buf).strip()
                     req_ms = TURN_SILENCE_MS
@@ -218,26 +324,34 @@ def main():
                     if not speaking_now and last_final_t is not None and (now_t - last_final_t) * 1000 >= req_ms and turn_buf:
                         final_text = full
                         if final_text:
-                            finalize_ms = int((now_t - last_final_t) * 1000)
-                            log = call_orchestrator_subprocess(final_text, asr_latency_ms=finalize_ms)
-                            print(
-                                f"\n[Eddie] spoke: {log.get('reply')}  "
-                                f"(asr={log.get('l_asr_ms')}ms llm={log.get('l_llm_ms',0)}ms "
-                                f"tts={log.get('l_tts_ms',0)}ms total={log.get('l_total_ms',0)}ms "
-                                f"ack={log.get('ack_type','none')})"
-                            )
-                            if log.get("request_exit"):
-                                # Wait until speaking flag clears (or becomes stale), then exit
-                                while True:
-                                    if not os.path.exists(SPEAKING_FLAG_PATH):
-                                        sys.exit(0)
-                                    try:
-                                        age_ms = (time.time() - os.path.getmtime(SPEAKING_FLAG_PATH)) * 1000.0
-                                    except Exception:
-                                        age_ms = 0
-                                    if age_ms >= ECHO_SUPPRESS_MS:
-                                        sys.exit(0)
-                                    time.sleep(0.1)
+                            if _is_awake():
+                                finalize_ms = int((now_t - last_final_t) * 1000)
+                                log = call_orchestrator_subprocess(final_text, asr_latency_ms=finalize_ms)
+                                print(
+                                    f"\n[Eddie] spoke: {log.get('reply')}  "
+                                    f"(asr={log.get('l_asr_ms')}ms llm={log.get('l_llm_ms',0)}ms "
+                                    f"tts={log.get('l_tts_ms',0)}ms total={log.get('l_total_ms',0)}ms "
+                                    f"ack={log.get('ack_type','none')})"
+                                )
+                                if log.get("request_exit"):
+                                    # Wait until speaking flag clears (or becomes stale), then exit
+                                    while True:
+                                        if not os.path.exists(SPEAKING_FLAG_PATH):
+                                            sys.exit(0)
+                                        try:
+                                            age_ms = (time.time() - os.path.getmtime(SPEAKING_FLAG_PATH)) * 1000.0
+                                        except Exception:
+                                            age_ms = 0
+                                        if age_ms >= ECHO_SUPPRESS_MS:
+                                            sys.exit(0)
+                                        time.sleep(0.1)
+                                # Extend window after speaking ends (no stall if already cleared)
+                                start_wait = time.time()
+                                while time.time() - start_wait < 5.0 and os.path.exists(SPEAKING_FLAG_PATH):
+                                    time.sleep(0.05)
+                                _extend_wake_window()
+                            else:
+                                print("\n[asleep] (final ignored)")
                         turn_buf.clear()
                         last_final_t = None
                         dictation_sent = ""
@@ -252,6 +366,11 @@ def main():
     finally:
         print("\n[exit] done.")
         q.put(None)
+        try:
+            if _is_awake():
+                _log_event("wake_close", reason="shutdown")
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
