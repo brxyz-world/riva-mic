@@ -97,5 +97,5 @@
     <Metric>reply_chars</Metric>
   </Measures>
 
-  <Ritual id="phase2plus-demo">90-second gauntlet with mixed prompts and actions.</Ritual>
+  <Ritual id="eddie2plus-demo">90-second gauntlet with mixed prompts and actions.</Ritual>
 </EHPP>

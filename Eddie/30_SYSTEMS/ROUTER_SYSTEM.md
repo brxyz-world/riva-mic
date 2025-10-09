@@ -92,7 +92,7 @@ Guidelines
 - Action (choose one based on context)
   - Save: `memory.write(tag=session_tagline, data=last_topics)` then `self.exit`.
   - Fetch: `retrieval.mcp(query="open todos for Eddie")` and offer a 1â€‘line reminder with accept/skip; then `self.exit`.
-- Gate: on Phase 5 (MCP Integration) per Dev Map; in earlier phases, stub via local store or n8n webhook.
+- Gate: on Eddie Version 2.5 (MCP Integration) per Dev Map; in earlier versions, stub via local store or n8n webhook.
 
 ---
 
@@ -104,7 +104,7 @@ Guidelines
 - Memory: `memory.write(tag, data)`, `memory.read(tag)`.
 
 Notes
-- Today, `Tools` are POSTed to `TOOLS_URL` (see `Eddie/config/personality.xml`). MCP arrives in Phase 5.
+- Today, `Tools` are POSTed to `TOOLS_URL` (see `Eddie/config/personality.xml`). MCP arrives in Eddie Version 2.5.
 
 ---
 
@@ -134,13 +134,13 @@ Mapping
 
 ---
 
-## 9) Phase Alignment (from Etymo_Holoson_Personality_Dev_Map.xml)
-- Phase 1: Router Core (done/baseline).
-- Phase 2: Personality Layer â†’ allow R1/R3/R4 in simple form; LLM signâ€‘offs are bounded, optional.
-- Phase 3: Identity Expansion â†’ prosody presets strengthen R3 flavor; keep budgets tight.
-- Phase 4: Embodiment â†’ timing/gesture hooks for exit beats (out of scope here).
-- Phase 5: MCP Integration â†’ enable R5 Retrieval via MCP; n8n webhooks as stepâ€‘stone.
-- Phase 6: Magnum Opus Vision â†’ narrative â€œsignatureâ€ closes as canon.
+## 9) Version Alignment (Dev Map reference)
+- Eddie Version 2.0: Router Core (done/baseline).
+- Eddie Version 2.2: Personality Layer â†’ allow R1/R3/R4 in simple form; LLM signâ€‘offs are bounded, optional.
+- Eddie Version 2.3: Identity Expansion â†’ prosody presets strengthen R3 flavor; keep budgets tight.
+- Eddie Version 2.4: Embodiment â†’ timing/gesture hooks for exit beats (out of scope here).
+- Eddie Version 2.5: MCP Integration â†’ enable R5 Retrieval via MCP; n8n webhooks as stepâ€‘stone.
+- Program 3.x (The Etymo Show): Magnum Opus Vision â†’ narrative â€œsignatureâ€ closes as canon.
 
 ---
 
@@ -189,7 +189,7 @@ Mapping
 This catalog is intentionally nonâ€‘binding; it documents intent and naming so we can implement surgically later.
 
 
-## 15) Phase 2: Moods (Draft)
+## 15) Eddie 2.2: Moods (Draft)
 
 Purpose
 - Introduce a non-random, contextual mood system that varies Eddie’s system prompt and router reply weights by time, weekday, weather, and recent interaction context. Replaces/absorbs prior prosody presets.
