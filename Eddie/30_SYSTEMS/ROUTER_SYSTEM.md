@@ -104,7 +104,7 @@ Guidelines
 - Memory: `memory.write(tag, data)`, `memory.read(tag)`.
 
 Notes
-- Today, `Tools` are POSTed to `TOOLS_URL` (see `config/personality.xml`). MCP arrives in Phase 5.
+- Today, `Tools` are POSTed to `TOOLS_URL` (see `Eddie/config/personality.xml`). MCP arrives in Phase 5.
 
 ---
 
@@ -321,4 +321,3 @@ selectors:
   inertia: medium
   variance: bounded_ollama(seed=YYYYMMDD+hour+user_hash)
 ```
-

@@ -1,0 +1,15 @@
+{
+  "id": "capsule-context-pack-pivot-2025-10-09",
+  "date": "2025-10-09T10:40:00Z",
+  "tags": ["context-pack", "refactor", "memory"],
+  "summary": "Canonical Eddie/ hierarchy stood up with context pack stubs and directories for memory, ops, and archives.",
+  "tokens": 110,
+  "sensitivity": "internal",
+  "provenance": {
+    "source": "codex-refactor",
+    "paths": [
+      "Eddie/10_CONTEXT/CONTEXT_PACK.md",
+      "Eddie/00_ADMIN/README.md"
+    ]
+  }
+}

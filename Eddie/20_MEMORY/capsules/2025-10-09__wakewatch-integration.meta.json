@@ -1,0 +1,15 @@
+{
+  "id": "capsule-wakewatch-integration-2025-10-09",
+  "date": "2025-10-09T10:05:00Z",
+  "tags": ["wake", "audio", "porcupine"],
+  "summary": "Wakewatch helper now lives with audio systems and shares repo-root flags with the mic and orchestrator.",
+  "tokens": 102,
+  "sensitivity": "internal",
+  "provenance": {
+    "source": "codex-refactor",
+    "paths": [
+      "Eddie/30_SYSTEMS/audio/wakewatch.py",
+      "Eddie/30_SYSTEMS/audio/riva_streaming_mic.py"
+    ]
+  }
+}

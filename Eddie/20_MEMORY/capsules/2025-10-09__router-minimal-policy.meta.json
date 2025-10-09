@@ -1,0 +1,15 @@
+{
+  "id": "capsule-router-policy-freeze-2025-10-09",
+  "date": "2025-10-09T09:30:00Z",
+  "tags": ["router", "policy", "eddie-version"],
+  "summary": "Router policy frozen around R_hello/R_exit/R_hush with weights captured for context pack seeding.",
+  "tokens": 118,
+  "sensitivity": "internal",
+  "provenance": {
+    "source": "codex-refactor",
+    "paths": [
+      "Eddie/10_CONTEXT/ROUTER_POLICY.md",
+      "Eddie/30_SYSTEMS/ROUTER_SYSTEM.md"
+    ]
+  }
+}
