@@ -1,0 +1,58 @@
+{
+  "artifacts": [
+    {
+      "id": "context_pack",
+      "path": "Eddie/10_CONTEXT/CONTEXT_PACK.md",
+      "kind": "doc",
+      "tags": ["context", "canon"]
+    },
+    {
+      "id": "router_policy",
+      "path": "Eddie/10_CONTEXT/ROUTER_POLICY.md",
+      "kind": "policy",
+      "tags": ["router", "mood"]
+    },
+    {
+      "id": "lexicon",
+      "path": "Eddie/10_CONTEXT/LEXICON.md",
+      "kind": "reference",
+      "tags": ["language", "normalization"]
+    },
+    {
+      "id": "router_system_doc",
+      "path": "Eddie/30_SYSTEMS/ROUTER_SYSTEM.md",
+      "kind": "system",
+      "tags": ["router", "design"]
+    },
+    {
+      "id": "mood_policy",
+      "path": "Eddie/30_SYSTEMS/MOOD_POLICY.md",
+      "kind": "system",
+      "tags": ["mood", "policy"]
+    },
+    {
+      "id": "context_pack_spec",
+      "path": "Eddie/40_ARTIFACTS/CONTEXT_PACK_SPEC.md",
+      "kind": "spec",
+      "tags": ["context", "bootstrap"]
+    },
+    {
+      "id": "capsule_router_policy_freeze",
+      "path": "Eddie/20_MEMORY/capsules/2025-10-09__router-minimal-policy.md",
+      "kind": "memory",
+      "tags": ["router", "capsule"]
+    },
+    {
+      "id": "capsule_wakewatch_integration",
+      "path": "Eddie/20_MEMORY/capsules/2025-10-09__wakewatch-integration.md",
+      "kind": "memory",
+      "tags": ["wake", "capsule"]
+    },
+    {
+      "id": "capsule_context_pack_pivot",
+      "path": "Eddie/20_MEMORY/capsules/2025-10-09__context-pack-pivot.md",
+      "kind": "memory",
+      "tags": ["context", "capsule"]
+    }
+  ]
+}

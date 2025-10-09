@@ -1,10 +1,18 @@
-﻿{
-  "shards": ["capsules", "graph"],
+{
+  "version": "0.2",
+  "artifactsIndex": "Eddie/10_CONTEXT/ARTIFACTS_INDEX.json",
+  "shards": [
+    "capsules",
+    "graph"
+  ],
   "privacy": {
     "default": "internal"
   },
   "paths": {
     "capsules": "Eddie/20_MEMORY/capsules",
     "graph": "Eddie/20_MEMORY/graph"
+  },
+  "schemas": {
+    "capsule": "Eddie/10_CONTEXT/schemas/capsule.schema.json"
   }
 }

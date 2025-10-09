@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Capsule",
+  "type": "object",
+  "required": ["id", "date", "tags", "summary", "tokens", "provenance"],
+  "properties": {
+    "id": {"type": "string"},
+    "date": {"type": "string", "format": "date-time"},
+    "tags": {"type": "array", "items": {"type": "string"}},
+    "summary": {"type": "string"},
+    "tokens": {"type": "integer"},
+    "sensitivity": {"type": "string", "enum": ["public", "internal", "private"]},
+    "provenance": {
+      "type": "object",
+      "required": ["source", "paths"],
+      "properties": {
+        "source": {"type": "string"},
+        "paths": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    }
+  }
+}
