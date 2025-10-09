@@ -10,23 +10,30 @@ Configure via environment:
   PORCUPINE_ACCESS_KEY   (required)
   PORCUPINE_KEYWORD_PATH (required)
   WAKE_URL               (optional; default http://127.0.0.1:6060/signal/wake)
-  EDDIE_WAKE_FLAG        (optional; default ../eddie_wake.flag next to repo root)
+  EDDIE_WAKE_FLAG        (optional; default repo-root/eddie_wake.flag)
   WAKE_WINDOW_MS         (optional; default 20000; used by mic)
 """
 
 import os
 import queue
 import sys
+from pathlib import Path
 
 import requests
 import sounddevice as sd
 import pvporcupine as pv
 
+_FILE_PATH = Path(__file__).resolve()
+_EDDIE_DIR = _FILE_PATH.parents[2]
+_REPO_ROOT = _FILE_PATH.parents[3]
+
 ACCESS_KEY = os.getenv("PORCUPINE_ACCESS_KEY", "").strip()
-KEYWORD_PATH = os.getenv("PORCUPINE_KEYWORD_PATH", "./Hello-Eddie.ppn")
+KEYWORD_PATH = os.getenv(
+    "PORCUPINE_KEYWORD_PATH",
+    str(_EDDIE_DIR / "config" / "Hello-Eddie.ppn"),
+)
 WAKE_URL = os.getenv("WAKE_URL", "http://127.0.0.1:6060/signal/wake")
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-WAKE_FLAG = os.getenv("EDDIE_WAKE_FLAG", os.path.join(_ROOT, "eddie_wake.flag"))
+WAKE_FLAG = os.getenv("EDDIE_WAKE_FLAG", str(_REPO_ROOT / "eddie_wake.flag"))
 
 
 def _post_wake():

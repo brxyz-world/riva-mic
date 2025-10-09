@@ -5,7 +5,7 @@
     <LatencyBudget ms="1200"/>
   </Principles>
 
-  <Personality ref="config/personality.xml">
+  <Personality ref="Eddie/config/personality.xml">
     <!-- Consumed by eddie_orchestrator._load_persona_from_xml(): sets SYSTEM_PROMPT_V2 -->
     <SystemPrompt>You are Eddie: concise, neutral, fast. Reply in 1–4 sentences (≤360 characters). Keep it clear.</SystemPrompt>
     <Stylebook voice="English-US.Male-1" terseness="concise" humor="dry-gentle">

@@ -9,6 +9,13 @@ from typing import Optional, Tuple
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
+# --- Path layout ---
+_FILE_PATH = Path(__file__).resolve()
+_SYSTEMS_DIR = _FILE_PATH.parents[1]
+_EDDIE_DIR = _FILE_PATH.parents[2]
+_REPO_ROOT = _FILE_PATH.parents[3]
+_CONFIG_DIR = _EDDIE_DIR / "config"
+
 # --- Config via env / sane defaults ---
 RIVA_SPEECH_API_URL = os.getenv("RIVA_SPEECH_API_URL", "localhost:50051")
 OLLAMA_URL          = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
@@ -17,8 +24,7 @@ VOICE_NAME          = os.getenv("VOICE_NAME", "English-US.Male-1")
 TOOLS_URL           = os.getenv("TOOLS_URL")
 
 # Per-run log rotation (kept). You can override with EDDIE_LOG.
-_HERE = Path(__file__).resolve().parent
-_LOGS_DIR = _HERE / "logs"
+_LOGS_DIR = _REPO_ROOT / "archive" / "logs"
 os.makedirs(_LOGS_DIR, exist_ok=True)
 _RUN_TS = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 _DEFAULT_LOG_PATH = str(_LOGS_DIR / f"Eddie_Convo_{_RUN_TS}.jsonl")
@@ -31,7 +37,7 @@ EDDIE_DEBUG_WAV     = os.getenv("EDDIE_DEBUG_WAV", "")
 OPEN_WAV_APP        = os.getenv("EDDIE_OPEN_WAV", "0") != "0"
 SPEAKING_FLAG_PATH  = os.getenv(
     "EDDIE_SPEAKING_FLAG",
-    os.path.join(os.path.dirname(__file__), "eddie_speaking.flag"),
+    str(_REPO_ROOT / "eddie_speaking.flag"),
 )
 FILLER_FIRST_MS     = int(os.getenv("FILLER_FIRST_MS", "1000"))          # don't emit filler before 1s
 FILLER_POST_PAUSE_MS= int(os.getenv("FILLER_POST_PAUSE_MS", "150"))      # pause after filler completes
@@ -305,7 +311,7 @@ class EddieOrchestrator:
             pass
 
     def _load_persona_from_xml(self):
-        cfg_path = Path(__file__).resolve().parent / "config" / "personality.xml"
+        cfg_path = _CONFIG_DIR / "personality.xml"
         try:
             root = ET.parse(str(cfg_path)).getroot()
 

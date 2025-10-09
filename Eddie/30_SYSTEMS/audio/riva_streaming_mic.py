@@ -4,6 +4,7 @@
 
 import os, sys, queue, argparse, time, json, subprocess, re
 from datetime import datetime
+from pathlib import Path
 import numpy as np
 import sounddevice as sd
 import grpc
@@ -18,20 +19,23 @@ def _type_to_cursor(text: str):
     except Exception as e:
         print(f"[type] {e}", file=sys.stderr)
 
+_FILE_PATH = Path(__file__).resolve()
+_REPO_ROOT = _FILE_PATH.parents[3]
+
 SEND_SILENCE_WHEN_MUTED = True  # keep the stream alive while muting playback
 SPEAKING_FLAG_PATH = os.getenv(
     "EDDIE_SPEAKING_FLAG",
-    os.path.join(os.path.dirname(__file__), "eddie_speaking.flag"),
+    str(_REPO_ROOT / "eddie_speaking.flag"),
 )
 ECHO_SUPPRESS_MS = int(os.getenv("ECHO_SUPPRESS_MS", "1200"))
 WAKE_WINDOW_MS = int(os.getenv("WAKE_WINDOW_MS", "20000"))
 WAKE_FLAG_PATH = os.getenv(
     "EDDIE_WAKE_FLAG",
-    os.path.join(os.path.dirname(__file__), "eddie_wake.flag"),
+    str(_REPO_ROOT / "eddie_wake.flag"),
 )
 
 # --- Use local generated stubs (no nvidia-riva-client import in this process) ---
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "riva_stubs"))
+sys.path.insert(0, str(_FILE_PATH.parent / "riva_stubs"))
 import riva_asr_pb2
 import riva_asr_pb2_grpc
 import riva_audio_pb2
@@ -141,8 +145,8 @@ def call_orchestrator_subprocess(final_text: str, asr_latency_ms: int = 0) -> di
     don't collide with our local riva_stubs. Returns the JSON dict the orchestrator prints.
     """
     py = sys.executable
-    orch_path = os.path.join(os.path.dirname(__file__), "eddie_orchestrator.py")
-    cmd = [py, orch_path, "--text", final_text]
+    orch_path = _FILE_PATH.parents[1] / "orchestrator" / "eddie_orchestrator.py"
+    cmd = [py, str(orch_path), "--text", final_text]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
         out = (proc.stdout or "").strip()
