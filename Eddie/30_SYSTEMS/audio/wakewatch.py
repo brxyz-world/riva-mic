@@ -34,6 +34,19 @@ KEYWORD_PATH = os.getenv(
 )
 WAKE_URL = os.getenv("WAKE_URL", "http://127.0.0.1:6060/signal/wake")
 WAKE_FLAG = os.getenv("EDDIE_WAKE_FLAG", str(_REPO_ROOT / "eddie_wake.flag"))
+DEBUG_WAKE = os.getenv("DEBUG_WAKE", "0") in ("1", "true", "True")
+
+
+def notify_main_thread(state: str):
+    """
+    Send a one-line wake/sleep status over stdout so the parent PowerShell or
+    mic subprocess can parse it.  Keeps protocol textual for simplicity.
+    """
+    try:
+        sys.stdout.write(f"[wakewatch]{state}\n")
+        sys.stdout.flush()
+    except Exception:
+        pass
 
 
 def _post_wake():
@@ -59,6 +72,10 @@ def main():
         return
 
     keyword_path = os.path.abspath(KEYWORD_PATH)
+    wake_flag_path = os.path.abspath(WAKE_FLAG)
+    if DEBUG_WAKE:
+        print(f"[wakewatch] keyword: {keyword_path}")
+        print(f"[wakewatch] wake_flag: {wake_flag_path}")
     if not os.path.exists(keyword_path):
         print(f"[wakewatch] Keyword file missing: {keyword_path}", file=sys.stderr)
         return
@@ -93,6 +110,8 @@ def main():
                 break
             frame = memoryview(pcm).cast("h")
             if porcupine.process(frame) >= 0:
+                if DEBUG_WAKE:
+                    print("[wakewatch] wake")
                 _post_wake()
     except KeyboardInterrupt:
         pass

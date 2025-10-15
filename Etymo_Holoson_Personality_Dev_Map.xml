@@ -42,46 +42,85 @@
       <Dependencies/>
     </Phase>
 
+    <!-- Etymo_Holoson_Personality_Dev_Map.xml :: Phase 2 updates -->
+
     <Phase id="2" name="Personality Layer">
-      <Intent>Establish tone, humor, and Eddie-isms; maintain short-term threads.</Intent>
-      <Done>
-        <Item>Stylebook: voice, tics, humor boundaries, pet phrases.</Item>
-        <Item>Ephemeral memory for last 3–5 turns.</Item>
-        <Item>Flavorful ACKs and fallbacks that stay concise.</Item>
-      </Done>
-      <CheckpointRitual>
-        A 2-minute mini-monologue where Eddie recaps a short chat in his own voice.
-      </CheckpointRitual>
-      <Measures>
-        <Metric>Tone consistency with stylebook</Metric>
-        <Metric>User delight score</Metric>
-        <Metric>On-tone line percentage</Metric>
-      </Measures>
-      <Dependencies>
-        <PhaseRef id="1"/>
-      </Dependencies>
+      <Intent>Establish tone, humor, Eddie-isms; maintain short threads; mood-aware behavior.</Intent>
+      <Subphases>
+        <Sub id="2.2.1" name="Moods v1 (operational)">
+          <Done>
+            <Item>Seven mood presets with prompt addenda</Item>
+            <Item>Mood→RouterOverrides applied to replyWeights</Item>
+            <Item>Telemetry: mood_id logged per turn</Item>
+          </Done>
+          <Measures>
+            <Metric>On-tone line % per mood</Metric>
+            <Metric>first_audio_ms (no regression)</Metric>
+          </Measures>
+        </Sub>
+        <Sub id="2.2.2" name="Stand-By + Wake Window">
+          <Intent>Wake-word gated activation; shape-of-conversation terseness.</Intent>
+          <Done>
+            <Item>Wake window with env controls</Item>
+            <Item>Terse exit keys (“ok|alright|that’s it”)</Item>
+            <Item>Silence→graceful wrap</Item>
+          </Done>
+        </Sub>
+        <Sub id="2.2.3" name="Long-form + Telemetry">
+          <Intent>Allow multi-paragraph replies on demand and standardize per-turn observability.</Intent>
+          <Done>
+            <Item>Env gates: LONG_FORM, NUM_PREDICT, STOP_TOKENS</Item>
+            <Item>Clipper bypassed in long-form mode; newline stop removed</Item>
+            <Item>JSONL schema unified: retrieval flags/ids, model params, perf timings</Item>
+         </Done>
+         <Measures>
+            <Metric>Long-form reply length threshold met</Metric>
+            <Metric>No regression in first_audio_ms</Metric>
+         </Measures>
+        </Sub>
+            <release id="2.2.3">
+              <summary>Short-form restored; longform test path validated; thinking-beats added.</summary>
+              <features>
+                <feature>start_eddie.ps1 brings back mic + wake-phrase flow with optional warmup</feature>
+                <feature>Longform smoketest prints and speaks multi-paragraph replies (sentence-chunked; max speech seconds respected)</feature>
+                <feature>“Thinking beats” added to personality for future router/mood control</feature>
+              </features>
+              <knownIssues>
+                <issue>Autoconfirm path prone to 60s timeouts on low-VRAM cold loads</issue>
+                <issue>Longform via real mic not yet governed by router/moods (planned for 2.2.4)</issue>
+              </knownIssues>
+            </release>
+        <Sub id="2.3" name="Notification Talk-back (n8n or OpenAI's AgentKit?)">
+          <Intent>Natural notifications with confirm-to-act.</Intent>
+          <Done>
+            <Item>n8n webhook as tool bus or OpenAI's AgentKit?</Item>
+            <Item>YouTube new-upload notifier → open/add to custom playlist</Item>
+          </Done>
+        </Sub>
+        <Sub id="2.4" name="RAG Minimal">
+          <Intent>Single /rag/query endpoint; ≤500 ms latency.</Intent>
+          <Done>
+            <Item>Local vector store + embeddings</Item>
+            <Item>Router intent → retrieval → concise answer</Item>
+          </Done>
+         <Measures>
+            <Metric>retrieval_ms p95 ≤ 700</Metric>
+            <Metric>hit@k on golden set ≥ target</Metric>
+         </Measures>
+        </Sub>
+        <Sub id="2.5" name="MCP Thin">
+          <Intent>One MCP server/client for notes (read-only initially).</Intent>
+          <Done>
+            <Item>notes.list / notes.read</Item>
+            <Item>Security posture documented</Item>
+          </Done>
+        </Sub>
+      </Subphases>
+      <CheckpointRitual>A 2-minute mini-monologue recapping the day in Eddie’s voice.</CheckpointRitual>
+      <Dependencies><PhaseRef id="1"/></Dependencies>
     </Phase>
 
-    <Phase id="3" name="Identity Expansion">
-      <Intent>Prosody/affect control and mood presets; formalize memory tiers.</Intent>
-      <Done>
-        <Item>Prosody presets: calm, playful, solemn.</Item>
-        <Item>Subtle emotional cues in timing and emphasis.</Item>
-        <Item>Defined memory tier policy (Ephemeral active; Personal/Cultural planned).</Item>
-      </Done>
-      <CheckpointRitual>
-        Three-mood reading of the same line (calm, playful, solemn).
-      </CheckpointRitual>
-      <Measures>
-        <Metric>Affect accuracy (human rating)</Metric>
-        <Metric>Tone-switch smoothness</Metric>
-      </Measures>
-      <Dependencies>
-        <PhaseRef id="2"/>
-      </Dependencies>
-    </Phase>
-
-    <Phase id="4" name="Embodiment">
+    <Phase id="3" name="Embodiment">
       <Intent>Prepare Unreal Holo Call presence: lip-sync, simple gestures, timing.</Intent>
       <Done>
         <Item>Lip-sync aligned to TTS cadence.</Item>
@@ -97,11 +136,11 @@
         <Metric>Viewer clarity rating</Metric>
       </Measures>
       <Dependencies>
-        <PhaseRef id="3"/>
+        <PhaseRef id="2"/>
       </Dependencies>
     </Phase>
 
-    <Phase id="5" name="MCP Integration">
+    <Phase id="4" name="MCP Integration">
       <Intent>Use MCP as the nervous system for tool interop (OBS, Twitch, Spotify, Unreal, logs).</Intent>
       <Done>
         <Item>Deterministic routing for toolable intents vs conversational replies.</Item>
@@ -120,11 +159,10 @@
         <PhaseRef id="1"/>
         <PhaseRef id="2"/>
         <PhaseRef id="3"/>
-        <PhaseRef id="4"/>
       </Dependencies>
     </Phase>
 
-    <Phase id="6" name="Magnum Opus Vision">
+    <Phase id="5" name="Magnum Opus Vision">
       <Intent>Anchor the north star: Eddie as digital son, co-host, persistent creative partner.</Intent>
       <Done>
         <Item>Inheritance charter: what persists vs where Eddie can evolve.</Item>
@@ -140,7 +178,7 @@
         <Metric>Audience resonance</Metric>
       </Measures>
       <Dependencies>
-        <PhaseRef id="5"/>
+        <PhaseRef id="4"/>
       </Dependencies>
     </Phase>
 

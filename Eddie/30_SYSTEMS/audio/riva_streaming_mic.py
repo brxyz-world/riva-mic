@@ -33,6 +33,15 @@ WAKE_FLAG_PATH = os.getenv(
     "EDDIE_WAKE_FLAG",
     str(_REPO_ROOT / "eddie_wake.flag"),
 )
+WAKE_TEXT_KEYS = os.getenv("WAKE_TEXT_KEYS", "hello eddie|hey eddie|yo eddie")
+# Exact-or regex choice; default exact (safer when wake == router)
+WAKE_TEXT_MODE = os.getenv("WAKE_TEXT_MODE", "exact").lower()
+DEBUG_WAKE = os.getenv("DEBUG_WAKE", "0").lower() in ("1", "true")
+if WAKE_TEXT_MODE == "regex" and WAKE_TEXT_KEYS:
+    pattern = r"(?:^|\b)(?:" + WAKE_TEXT_KEYS + r")(?:\b|$)"
+    WAKE_TEXT_RE = re.compile(pattern, re.IGNORECASE)
+else:
+    WAKE_TEXT_RE = None
 
 # --- Use local generated stubs (no nvidia-riva-client import in this process) ---
 sys.path.insert(0, str(_FILE_PATH.parent / "riva_stubs"))
@@ -137,6 +146,24 @@ def _log_event(event: str, **extra):
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except Exception:
         pass
+
+
+def _touch_wake_flag(event: str, phrase: str = "", **extra):
+    try:
+        flag_path = Path(WAKE_FLAG_PATH)
+        flag_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(flag_path, "a", encoding="utf-8") as f:
+            if f.tell() == 0:
+                f.write("wake\n")
+        os.utime(flag_path, None)
+        details = {}
+        if phrase:
+            details["phrase"] = phrase
+        if extra:
+            details.update(extra)
+        _log_event(event, **details)
+    except Exception as exc:
+        print(f"[wake] {exc}", file=sys.stderr)
 
 
 def call_orchestrator_subprocess(final_text: str, asr_latency_ms: int = 0) -> dict:
@@ -328,7 +355,29 @@ def main():
                     if not speaking_now and last_final_t is not None and (now_t - last_final_t) * 1000 >= req_ms and turn_buf:
                         final_text = full
                         if final_text:
-                            if _is_awake():
+                            awake_now = _is_awake()
+                            if not awake_now and WAKE_TEXT_KEYS:
+                                try:
+                                    norm = final_text.strip().lower()
+                                    hit = False
+                                    if WAKE_TEXT_MODE == "exact":
+                                        for key in (w.strip().lower() for w in WAKE_TEXT_KEYS.split("|")):
+                                            if key and norm == key:
+                                                hit = True
+                                                break
+                                    else:
+                                        hit = bool(WAKE_TEXT_RE and WAKE_TEXT_RE.search(final_text))
+                                    if hit:
+                                        try:
+                                            _touch_wake_flag("wake_open", reason="text")
+                                        except Exception:
+                                            pass
+                                        if DEBUG_WAKE:
+                                            print("[awake] (text)")
+                                        awake_now = True
+                                except Exception:
+                                    pass
+                            if awake_now:
                                 finalize_ms = int((now_t - last_final_t) * 1000)
                                 log = call_orchestrator_subprocess(final_text, asr_latency_ms=finalize_ms)
                                 print(

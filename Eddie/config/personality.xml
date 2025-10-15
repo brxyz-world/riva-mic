@@ -20,6 +20,13 @@
       <U weight="0.5">Hm</U><U weight="0.3">Hmm</U><U weight="0.2">Uh</U>
     </Fillers>
 
+    <ThinkingBeats prob="0.4" firstMs="700" postPauseMs="120" maxCount="2" tierMs="250">
+     <U weight="0.35">hmm…</U>
+     <U weight="0.25">oh—</U>
+     <U weight="0.20">okay, okay…</U>
+     <U weight="0.20">let’s see…</U>
+    </ThinkingBeats>
+
     <!-- Consumed by _load_persona_from_xml(): sets REPLACE_WINDOW_MS if env not set -->
     <ACK policy="latency-shaped" replaceWindowMs="2000">
       <Utility prefix="" suffix=""/><Chitchat prefix="" suffix=""/>
