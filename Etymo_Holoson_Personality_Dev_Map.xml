@@ -1,4 +1,6 @@
-<EHPP version="1.0" lane="Personality" repo="https://github.com/brxyz-world/riva-mic">
+<?xml version="1.0" encoding="UTF-8"?>
+<EHPDM version="1.1" lane="Personality" repo="https://github.com/brxyz-world/riva-mic">
+
   <Principles>
     <RoutingPhilosophy>ACK first → route smart → add flavor</RoutingPhilosophy>
     <Axes>
@@ -8,179 +10,125 @@
     </Axes>
     <MemoryTiers>
       <Tier name="Ephemeral" status="active">Short-turn carryover; local thread references.</Tier>
-      <Tier name="Personal" status="planned">Stable user preferences and safe facts.</Tier>
-      <Tier name="Cultural" status="planned">Eddie’s lore, recurring bits, show canon.</Tier>
+      <Tier name="Personal"  status="planned">Stable user preferences and safe facts.</Tier>
+      <Tier name="Cultural"  status="planned">Eddie’s lore, recurring bits, show canon.</Tier>
     </MemoryTiers>
-    <LaneDiscipline>No debugging or code in this lane; all technical issues go to Eddie Debug Lane.</LaneDiscipline>
+    <LaneDiscipline>No debugging or code in this lane; technical issues live in the Debug Lane.</LaneDiscipline>
   </Principles>
 
-  <Utterances>
-    <Fillers>
-      <U weight="0.6">Hm</U>
-      <U weight="0.3">Hmm</U>
-      <U weight="0.1">Uh</U>
-    </Fillers>
-  </Utterances>
+  <Versions>
 
-  <Phases>
-
-    <Phase id="1" name="Router Core">
+    <!-- 1.x foundation already achieved -->
+    <Version id="1" name="Router Core">
       <Intent>Reliable branching among utility, personality, and fallback with instant ACKs.</Intent>
-      <Done>
-        <Item>Consistent ACK-first behavior within latency budget.</Item>
-        <Item>Explicit routing branches: utility | personality | fallback.</Item>
-        <Item>Light personality flavor on ACKs and fallbacks.</Item>
-      </Done>
-      <CheckpointRitual>
-        A 90-second routing gauntlet of 10 mixed prompts without stalls.
-      </CheckpointRitual>
       <Measures>
-        <Metric>ACK latency</Metric>
-        <Metric>Route accuracy percent</Metric>
-        <Metric>User-perceived snappiness</Metric>
+        <Metric>ACK latency</Metric><Metric>Route accuracy %</Metric><Metric>User-perceived snappiness</Metric>
       </Measures>
-      <Dependencies/>
-    </Phase>
+    </Version>
 
-    <!-- Etymo_Holoson_Personality_Dev_Map.xml :: Phase 2 updates -->
+    <!-- 2.x: Personality & Operator Era -->
+    <Version id="2" name="Personality & Operator Era">
+      <Intent>Establish tone/moods; govern longform; prepare light RAG and tool bridges.</Intent>
 
-    <Phase id="2" name="Personality Layer">
-      <Intent>Establish tone, humor, Eddie-isms; maintain short threads; mood-aware behavior.</Intent>
       <Subphases>
-        <Sub id="2.2.1" name="Moods v1 (operational)">
-          <Done>
-            <Item>Seven mood presets with prompt addenda</Item>
-            <Item>Mood→RouterOverrides applied to replyWeights</Item>
-            <Item>Telemetry: mood_id logged per turn</Item>
-          </Done>
-          <Measures>
-            <Metric>On-tone line % per mood</Metric>
-            <Metric>first_audio_ms (no regression)</Metric>
-          </Measures>
-        </Sub>
-        <Sub id="2.2.2" name="Stand-By + Wake Window">
-          <Intent>Wake-word gated activation; shape-of-conversation terseness.</Intent>
-          <Done>
-            <Item>Wake window with env controls</Item>
-            <Item>Terse exit keys (“ok|alright|that’s it”)</Item>
-            <Item>Silence→graceful wrap</Item>
-          </Done>
-        </Sub>
+
+        <Sub id="2.2.1" name="Moods v1 (operational)"/>
+        <Sub id="2.2.2" name="Stand-By + Wake Window"/>
+
         <Sub id="2.2.3" name="Long-form + Telemetry">
-          <Intent>Allow multi-paragraph replies on demand and standardize per-turn observability.</Intent>
-          <Done>
-            <Item>Env gates: LONG_FORM, NUM_PREDICT, STOP_TOKENS</Item>
-            <Item>Clipper bypassed in long-form mode; newline stop removed</Item>
-            <Item>JSONL schema unified: retrieval flags/ids, model params, perf timings</Item>
-         </Done>
-         <Measures>
-            <Metric>Long-form reply length threshold met</Metric>
-            <Metric>No regression in first_audio_ms</Metric>
-         </Measures>
+          <release id="2.2.3">
+            <summary>Short-form restored; longform test path validated; thinking-beats added.</summary>
+          </release>
         </Sub>
-            <release id="2.2.3">
-              <summary>Short-form restored; longform test path validated; thinking-beats added.</summary>
-              <features>
-                <feature>start_eddie.ps1 brings back mic + wake-phrase flow with optional warmup</feature>
-                <feature>Longform smoketest prints and speaks multi-paragraph replies (sentence-chunked; max speech seconds respected)</feature>
-                <feature>“Thinking beats” added to personality for future router/mood control</feature>
-              </features>
-              <knownIssues>
-                <issue>Autoconfirm path prone to 60s timeouts on low-VRAM cold loads</issue>
-                <issue>Longform via real mic not yet governed by router/moods (planned for 2.2.4)</issue>
-              </knownIssues>
-            </release>
-        <Sub id="2.3" name="Notification Talk-back (n8n or OpenAI's AgentKit?)">
-          <Intent>Natural notifications with confirm-to-act.</Intent>
-          <Done>
-            <Item>n8n webhook as tool bus or OpenAI's AgentKit?</Item>
-            <Item>YouTube new-upload notifier → open/add to custom playlist</Item>
-          </Done>
+
+        <Sub id="2.2.4" name="Router-Gated Longform">
+          <release id="2.2.4">
+            <summary>Router-gated longform & smarter TTS; single-print console; mic ready-check (default ON).</summary>
+            <features>
+              <feature>Story begins only on explicit ask or follow-up on same topic; rare allegory/reflect routes.</feature>
+              <feature>Mic-only ready-check with timeout; optional thinking beats when long gen &gt; 8s.</feature>
+              <feature>Single console emission for longform; chunker avoids mid-word cuts.</feature>
+              <feature>Operator panel file and wake==router troubleshooting note; README links.</feature>
+            </features>
+            <Measures>
+              <Metric>long_form=true on routed story turns; zero false positives on utility prompts.</Metric>
+              <Metric>ready_check_ms p95 ≤ 1000; timeout path &lt; 5% longform sessions.</Metric>
+              <Metric>Thinking beats on longform gens &gt; 8s; 0 beats in short-form.</Metric>
+              <Metric>Exactly one console print per longform turn in smoketest.</Metric>
+              <Metric>midword_cut_rate &lt; 5%; spoken_s ≤ MAX_S + 1.0.</Metric>
+              <Metric>README links to operator panel (no duplication); “wake==router” note present; links OK.</Metric>
+              <Metric>first_audio_ms p95 regression ≤ +100ms vs 2.2.3.</Metric>
+              <Metric>Story ≥ 600 chars, ≥ 4 paragraphs, no clipper; LLM latency p95 ≤ 15s at LONGFORM_NUM_PREDICT≈384 (warm).</Metric>
+            </Measures>
+            <links><link rel="taskcard">CETC-1</link><link rel="streams">1R,1S,1A</link></links>
+          </release>
+
+          <!-- Router keys, follow-ups, moods, wake window -->
+          <RouterPolicy>
+            <Keys>
+              <Key id="R_hello"          kind="greeting" setsLongForm="false"/>
+              <Key id="R_hush"           kind="utility"  setsLongForm="false"/>
+              <Key id="R_exit"           kind="utility"  setsLongForm="false"/>
+              <Key id="R_story.begin"    kind="story"    setsLongForm="true"/>
+              <Key id="R_story.continue" kind="story"    setsLongForm="true"/>
+              <Key id="R_allegory"       kind="story"    setsLongForm="true" rateLimit="1/5turns"/>
+              <Key id="R_reflect"        kind="story"    setsLongForm="true" rateLimit="1/5turns"/>
+            </Keys>
+            <FollowUpPolicy>
+              <Trigger phrases="expand|go deeper|tell me more|continue">
+                <Route to="R_story.continue"/>
+                <TopicConstraint>same-as-previous-reply</TopicConstraint>
+              </Trigger>
+            </FollowUpPolicy>
+            <MoodBiases>
+              <PrimaryStoryMood id="Content_Eve"/>
+              <Mood id="mood.contemplative"><Bias route="R_reflect"  weight="+0.10"/></Mood>
+              <Mood id="mood.playful">      <Bias route="R_allegory" weight="+0.10"/></Mood>
+              <Invariants>
+                <Rule>Utility keys must always set long_form=false.</Rule>
+                <Rule>Wake phrase opens a time-boxed window; does not set long_form.</Rule>
+              </Invariants>
+            </MoodBiases>
+            <WakeWindow defaultSeconds="20">
+              <MoodOverride mood="Content_Eve" seconds="30"/>
+            </WakeWindow>
+          </RouterPolicy>
         </Sub>
-        <Sub id="2.4" name="RAG Minimal">
-          <Intent>Single /rag/query endpoint; ≤500 ms latency.</Intent>
-          <Done>
-            <Item>Local vector store + embeddings</Item>
-            <Item>Router intent → retrieval → concise answer</Item>
-          </Done>
-         <Measures>
-            <Metric>retrieval_ms p95 ≤ 700</Metric>
-            <Metric>hit@k on golden set ≥ target</Metric>
-         </Measures>
-        </Sub>
-        <Sub id="2.5" name="MCP Thin">
-          <Intent>One MCP server/client for notes (read-only initially).</Intent>
-          <Done>
-            <Item>notes.list / notes.read</Item>
-            <Item>Security posture documented</Item>
-          </Done>
-        </Sub>
+
+        <Sub id="2.3" name="Notification Talk-back"/>
+        <Sub id="2.4" name="RAG Minimal"/>
+        <Sub id="2.5" name="MCP Thin"/>
+        <Sub id="2.6" name="Embodiment Prep (UE lip-sync, gesture palette)"/>
+
       </Subphases>
-      <CheckpointRitual>A 2-minute mini-monologue recapping the day in Eddie’s voice.</CheckpointRitual>
-      <Dependencies><PhaseRef id="1"/></Dependencies>
-    </Phase>
+    </Version>
 
-    <Phase id="3" name="Embodiment">
-      <Intent>Prepare Unreal Holo Call presence: lip-sync, simple gestures, timing.</Intent>
-      <Done>
-        <Item>Lip-sync aligned to TTS cadence.</Item>
-        <Item>Minimal gesture palette: idle, nod, tilt, greet.</Item>
-        <Item>Stage-presence script: intro, acknowledgment beats, resting states.</Item>
-      </Done>
-      <CheckpointRitual>
-        A 30-second Unreal clip where Eddie introduces himself and reacts to a prompt.
-      </CheckpointRitual>
-      <Measures>
-        <Metric>Lip-sync drift (ms)</Metric>
-        <Metric>Gesture timing score</Metric>
-        <Metric>Viewer clarity rating</Metric>
-      </Measures>
+    <!-- 3.x: Eddie for The Etymo Show -->
+    <Version id="3" name="Eddie for The Etymo Show">
+      <Intent>Live Unreal MetaHuman host: show rundown, Twitch chat, b-roll, co-host appearances.</Intent>
+      <CheckpointRitual>30–60s cold open in Unreal with chat interjections and camera cuts.</CheckpointRitual>
       <Dependencies>
-        <PhaseRef id="2"/>
+        <PhaseRef id="2.4"/><PhaseRef id="2.5"/><PhaseRef id="2.6"/>
       </Dependencies>
-    </Phase>
+    </Version>
 
-    <Phase id="4" name="MCP Integration">
-      <Intent>Use MCP as the nervous system for tool interop (OBS, Twitch, Spotify, Unreal, logs).</Intent>
-      <Done>
-        <Item>Deterministic routing for toolable intents vs conversational replies.</Item>
-        <Item>Safe-ops wrapper with confirmations for sensitive actions.</Item>
-        <Item>Autonomy loop: ask → confirm → execute → report.</Item>
-      </Done>
-      <CheckpointRitual>
-        A live-show stub: start/stop mock stream, play a track, and log results.
-      </CheckpointRitual>
-      <Measures>
-        <Metric>Task success rate</Metric>
-        <Metric>Error recovery speed</Metric>
-        <Metric>User trust signals</Metric>
-      </Measures>
-      <Dependencies>
-        <PhaseRef id="1"/>
-        <PhaseRef id="2"/>
-        <PhaseRef id="3"/>
-      </Dependencies>
-    </Phase>
+  </Versions>
 
-    <Phase id="5" name="Magnum Opus Vision">
-      <Intent>Anchor the north star: Eddie as digital son, co-host, persistent creative partner.</Intent>
-      <Done>
-        <Item>Inheritance charter: what persists vs where Eddie can evolve.</Item>
-        <Item>Cultural memory initialized (house lore and recurring bits).</Item>
-        <Item>Pilot performance script for Etymo Show / Holo Call.</Item>
-      </Done>
-      <CheckpointRitual>
-        A short showcase: Eddie opens, riffs with the user, and closes with a signature beat.
-      </CheckpointRitual>
-      <Measures>
-        <Metric>Co-performance flow score</Metric>
-        <Metric>Narrative coherence</Metric>
-        <Metric>Audience resonance</Metric>
-      </Measures>
-      <Dependencies>
-        <PhaseRef id="4"/>
-      </Dependencies>
-    </Phase>
+  <!-- Task Cards registry -->
+  <TaskCards>
+    <TaskCard id="CETC-1" name="Longform Mode Switch">
+      <Streams>1R,1S,1A</Streams>
+      <Releases>
+        <ReleaseRef id="2.2.3" note="CETC-1.0"/>
+        <ReleaseRef id="2.2.4" note="CETC-1.1 init, 1.2 impl"/>
+      </Releases>
+    </TaskCard>
+    <TaskCard id="CETC-2" name="JSONL Schema Unify"/>
+    <TaskCard id="CETC-3" name="Memory Service (min)"/>
+    <TaskCard id="CETC-4" name="Capsule Embed Index"/>
+    <TaskCard id="CETC-5" name="Orchestrator RAG Inject"/>
+    <TaskCard id="CETC-6" name="Test Harness CLI"/>
+    <TaskCard id="CETC-7" name="Docs Refresh"/>
+  </TaskCards>
 
-  </Phases>
-</EHPP>
+</EHPDM>
